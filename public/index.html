@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EditPro — File Renamer</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="header">
+        <img
+          src="editpro-logo.png"
+          alt="EditPro"
+          class="brand-logo"
+          width="88"
+          height="88"
+        />
+        <div class="brand-text">
+          <h1>EditPro</h1>
+          <p class="subtitle">Rename files in a folder to a numeric sequence</p>
+        </div>
+      </header>
+
+      <main class="main">
+        <section class="card">
+          <h2>1. Choose folder</h2>
+          <div class="folder-row">
+            <input
+              type="text"
+              id="folderPath"
+              placeholder="Paste full path (e.g. C:\Photos) or use Browse"
+            />
+            <button type="button" id="applyPathBtn" class="btn btn-secondary">
+              Use path
+            </button>
+            <button type="button" id="browseBtn" class="btn btn-primary">
+              Browse…
+            </button>
+          </div>
+          <p id="folderMeta" class="meta">Use Browse (Edge/Chrome) or paste a full folder path and click Use path.</p>
+        </section>
+
+        <section class="card">
+          <h2>2. Sequence settings</h2>
+          <div class="settings-grid">
+            <label class="field">
+              <span>Starting number</span>
+              <input type="number" id="startNumber" value="1" min="0" step="1" />
+            </label>
+            <label class="field">
+              <span>Gap</span>
+              <input type="number" id="gap" value="1" min="1" step="1" />
+              <small>e.g. 2 → 1, 3, 5, 7…</small>
+            </label>
+            <label class="field">
+              <span>Zero padding</span>
+              <input type="number" id="padding" value="0" min="0" max="10" step="1" />
+              <small>e.g. 3 → 001, 002, 003</small>
+            </label>
+            <label class="field">
+              <span>Prefix (optional)</span>
+              <input type="text" id="prefix" placeholder="IMG_" />
+            </label>
+            <label class="field">
+              <span>Suffix (optional)</span>
+              <input type="text" id="suffix" placeholder="_photo" />
+            </label>
+            <label class="field field-wide">
+              <span>Sort files by</span>
+              <select id="sortBy">
+                <option value="name-asc">Name (A → Z)</option>
+                <option value="name-desc">Name (Z → A)</option>
+                <option value="modified-asc">Date modified (oldest first)</option>
+                <option value="modified-desc">Date modified (newest first)</option>
+              </select>
+            </label>
+          </div>
+          <div class="actions">
+            <button type="button" id="previewBtn" class="btn btn-secondary" disabled>
+              Preview rename
+            </button>
+            <button type="button" id="renameBtn" class="btn btn-danger" disabled>
+              Rename files
+            </button>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="preview-header">
+            <h2>3. Preview</h2>
+            <span id="previewCount" class="badge">0 files</span>
+          </div>
+          <div id="message" class="message hidden" role="alert"></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Current name</th>
+                  <th></th>
+                  <th>New name</th>
+                </tr>
+              </thead>
+              <tbody id="previewBody">
+                <tr class="empty-row">
+                  <td colspan="4">Preview will appear here after you choose a folder and click Preview.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
