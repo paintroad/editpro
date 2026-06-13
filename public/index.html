@@ -1,118 +1,365 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>EditPro — File Renamer</title>
+    <title>EditPro</title>
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <link rel="apple-touch-icon" href="favicon.png" />
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem("editpro-theme") || "light";
+          document.documentElement.className = theme;
+          document.documentElement.dataset.theme = theme;
+        } catch (e) {}
+      })();
+    </script>
+    <base href="/editpro/" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <div class="app">
-      <header class="header">
-        <img
-          src="editpro-logo.png"
-          alt="EditPro"
-          class="brand-logo"
-          width="88"
-          height="88"
-        />
-        <div class="brand-text">
-          <h1>EditPro</h1>
-          <p class="subtitle">Rename files in a folder to a numeric sequence</p>
+    <div class="app-shell">
+      <aside class="app-rail" role="navigation" aria-label="Application">
+        <div class="rail-brand">
+          <img src="editpro-logo-light.png" alt="EditPro" class="rail-logo" id="railLogo" />
         </div>
-      </header>
+        <nav class="rail-modules">
+          <button type="button" class="rail-module active" data-module="local" title="Local Editing" aria-label="Local Editing">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
+            <span class="rail-module-label">Local Editing</span>
+          </button>
+          <button type="button" class="rail-module" data-module="live" title="SEO Engine" aria-label="SEO Engine">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="M20 20l-3.5-3.5"/><path stroke-linecap="round" d="M8 11h6M11 8v6"/></svg>
+            <span class="rail-module-label">SEO Engine</span>
+          </button>
+        </nav>
+        <button type="button" id="sidebarThemeToggle" class="rail-module rail-theme" aria-label="Switch to dark mode" title="Dark mode">
+          <span class="rail-theme-icon" aria-hidden="true"></span>
+          <span class="rail-module-label" id="railThemeLabel">Dark mode</span>
+        </button>
+      </aside>
 
-      <main class="main">
-        <section class="card">
-          <h2>1. Choose folder</h2>
-          <div class="folder-row">
-            <input
-              type="text"
-              id="folderPath"
-              placeholder="Paste full path (e.g. C:\Photos) or use Browse"
-            />
-            <button type="button" id="applyPathBtn" class="btn btn-secondary">
-              Use path
-            </button>
-            <button type="button" id="browseBtn" class="btn btn-primary">
-              Browse…
-            </button>
-          </div>
-          <p id="folderMeta" class="meta">Use Browse (Edge/Chrome) or paste a full folder path and click Use path.</p>
-        </section>
+      <main class="main-content">
+        <div id="module-local" class="module-panel">
+          <section class="card">
+            <h2>1. Choose folder</h2>
+            <div class="folder-row">
+              <input type="text" id="folderPath" placeholder="Paste full path (e.g. C:\Photos) or use Browse" />
+              <button type="button" id="applyPathBtn" class="btn btn-secondary">Use path</button>
+              <button type="button" id="browseBtn" class="btn btn-primary">Browse…</button>
+            </div>
+            <p id="folderMeta" class="meta">Use Browse (Edge/Chrome) or paste a full folder path and click Use path.</p>
+          </section>
 
-        <section class="card">
-          <h2>2. Sequence settings</h2>
-          <div class="settings-grid">
-            <label class="field">
-              <span>Starting number</span>
-              <input type="number" id="startNumber" value="1" min="0" step="1" />
-            </label>
-            <label class="field">
-              <span>Gap</span>
-              <input type="number" id="gap" value="1" min="1" step="1" />
-              <small>e.g. 2 → 1, 3, 5, 7…</small>
-            </label>
-            <label class="field">
-              <span>Zero padding</span>
-              <input type="number" id="padding" value="0" min="0" max="10" step="1" />
-              <small>e.g. 3 → 001, 002, 003</small>
-            </label>
-            <label class="field">
-              <span>Prefix (optional)</span>
-              <input type="text" id="prefix" placeholder="IMG_" />
-            </label>
-            <label class="field">
-              <span>Suffix (optional)</span>
-              <input type="text" id="suffix" placeholder="_photo" />
-            </label>
-            <label class="field field-wide">
-              <span>Sort files by</span>
-              <select id="sortBy">
-                <option value="name-asc">Name (A → Z)</option>
-                <option value="name-desc">Name (Z → A)</option>
-                <option value="modified-asc">Date modified (oldest first)</option>
-                <option value="modified-desc">Date modified (newest first)</option>
-              </select>
-            </label>
-          </div>
-          <div class="actions">
-            <button type="button" id="previewBtn" class="btn btn-secondary" disabled>
-              Preview rename
-            </button>
-            <button type="button" id="renameBtn" class="btn btn-danger" disabled>
-              Rename files
-            </button>
-          </div>
-        </section>
+          <section class="card">
+            <h2>2. Sequence settings</h2>
+            <div class="settings-grid">
+              <label class="field">
+                <span>Starting number</span>
+                <input type="number" id="startNumber" value="1" min="0" step="1" />
+              </label>
+              <label class="field">
+                <span>Gap</span>
+                <input type="number" id="gap" value="1" min="1" step="1" />
+                <small>e.g. 2 → 1, 3, 5, 7…</small>
+              </label>
+              <label class="field">
+                <span>Zero padding</span>
+                <input type="number" id="padding" value="0" min="0" max="10" step="1" />
+                <small>e.g. 3 → 001, 002, 003</small>
+              </label>
+              <label class="field">
+                <span>Prefix (optional)</span>
+                <input type="text" id="prefix" placeholder="IMG_" />
+              </label>
+              <label class="field">
+                <span>Suffix (optional)</span>
+                <input type="text" id="suffix" placeholder="_photo" />
+              </label>
+              <label class="field field-wide">
+                <span>Sort files by</span>
+                <select id="sortBy">
+                  <option value="name-asc">Name (A → Z)</option>
+                  <option value="name-desc">Name (Z → A)</option>
+                  <option value="modified-asc">Date modified (oldest first)</option>
+                  <option value="modified-desc">Date modified (newest first)</option>
+                </select>
+              </label>
+            </div>
+            <div class="actions">
+              <button type="button" id="previewBtn" class="btn btn-secondary" disabled>Preview rename</button>
+              <button type="button" id="renameBtn" class="btn btn-danger" disabled>Rename files</button>
+            </div>
+          </section>
 
-        <section class="card">
-          <div class="preview-header">
-            <h2>3. Preview</h2>
-            <span id="previewCount" class="badge">0 files</span>
+          <section class="card">
+            <div class="preview-header">
+              <h2>3. Preview</h2>
+              <span id="previewCount" class="badge">0 files</span>
+            </div>
+            <div id="localMessage" class="message hidden" role="alert"></div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Current name</th>
+                    <th></th>
+                    <th>New name</th>
+                  </tr>
+                </thead>
+                <tbody id="previewBody">
+                  <tr class="empty-row">
+                    <td colspan="4">Preview will appear here after you choose a folder.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <div id="module-live" class="module-panel seo-module" hidden>
+          <div id="liveMessage" class="message seo-toast hidden" role="alert"></div>
+
+          <div id="fetchOverlay" class="fetch-overlay" hidden aria-live="polite">
+            <div class="fetch-overlay-panel">
+              <p id="fetchOverlayTitle" class="fetch-overlay-title">Fetching products</p>
+              <p id="fetchOverlayStats" class="fetch-overlay-stats">0 products · 0 collections</p>
+              <button type="button" id="fetchStopBtn" class="btn btn-secondary btn-sm fetch-overlay-stop">Stop fetching</button>
+            </div>
           </div>
-          <div id="message" class="message hidden" role="alert"></div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Current name</th>
-                  <th></th>
-                  <th>New name</th>
-                </tr>
-              </thead>
-              <tbody id="previewBody">
-                <tr class="empty-row">
-                  <td colspan="4">Preview will appear here after you choose a folder and click Preview.</td>
-                </tr>
-              </tbody>
-            </table>
+
+          <div class="seo-action-bar">
+            <span id="storeNameLabel" class="store-name-label">No store connected</span>
+            <div class="seo-action-cluster">
+              <button type="button" id="storeActionBtn" class="btn btn-secondary btn-sm">Connect Store</button>
+              <button type="button" id="openSettingsBtn" class="btn btn-secondary btn-sm">Settings</button>
+              <button type="button" id="openSyncLogBtn" class="btn btn-secondary btn-sm">Logs</button>
+              <button type="button" id="applyRulesBtn" class="btn btn-primary btn-sm" disabled>Apply rules</button>
+            </div>
           </div>
-        </section>
+
+          <div class="seo-resource-tabs" role="tablist">
+            <button type="button" class="resource-tab active" data-live-tab="products" role="tab">
+              Products <span id="tabCountProducts" class="tab-count">0</span>
+            </button>
+            <button type="button" class="resource-tab" data-live-tab="collections" role="tab">
+              Collections <span id="tabCountCollections" class="tab-count">0</span>
+            </button>
+            <button type="button" class="resource-tab" data-live-tab="articles" role="tab">
+              Blogs <span id="tabCountArticles" class="tab-count">0</span>
+            </button>
+          </div>
+
+          <div class="seo-filter-bar">
+            <div id="catalogFilterBar" class="filter-scroll-bar"></div>
+            <div class="filter-actions">
+              <button type="button" id="clearSelectionBtn" class="btn btn-secondary btn-sm">Clear</button>
+              <div id="catalogPagination" class="catalog-pagination" hidden>
+                <button type="button" id="catalogPrevBtn" class="catalog-page-btn">Prev</button>
+                <span id="catalogPageInfo" class="catalog-page-info"></span>
+                <button type="button" id="catalogNextBtn" class="catalog-page-btn">Next</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="catalogList" class="seo-list-scroll">
+            <div class="catalog-empty">Fetch your store to browse products, collections, and blog articles.</div>
+          </div>
+        </div>
       </main>
     </div>
 
-    <script src="app.js"></script>
+    <div id="connectionModal" class="modal" hidden>
+      <div class="modal-backdrop"></div>
+      <div class="modal-panel" role="dialog" aria-labelledby="connectionModalTitle">
+        <div class="modal-header">
+          <h2 id="connectionModalTitle">Shopify connection</h2>
+          <button type="button" id="connectionModalClose" class="modal-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="meta">
+            Create a custom app in Shopify Admin → Settings → Apps → Develop apps. Grant these
+            Admin API scopes, then reinstall the app and copy the new access token:
+            <code>read_products</code>, <code>write_products</code>, <code>read_content</code>,
+            <code>write_content</code>, <code>read_files</code>, <code>write_files</code>.
+          </p>
+          <div class="settings-grid">
+            <label class="field field-wide">
+              <span>Store domain</span>
+              <input type="text" id="storeDomain" placeholder="your-store.myshopify.com" />
+            </label>
+            <label class="field field-wide">
+              <span>Admin API access token</span>
+              <input type="password" id="accessToken" placeholder="shpat_…" autocomplete="off" />
+              <small id="tokenHint">No token saved yet.</small>
+            </label>
+          </div>
+          <p id="configPathHint" class="meta"></p>
+          <div id="connectionMessage" class="message hidden" role="alert"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="testConnectionBtn" class="btn btn-secondary">Test connection</button>
+          <button type="button" id="saveConnectionBtn" class="btn btn-primary">Save connection</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="settingsModal" class="modal" hidden>
+      <div class="modal-backdrop"></div>
+      <div class="modal-panel modal-panel-wide" role="dialog" aria-labelledby="settingsModalTitle">
+        <div class="modal-header">
+          <h2 id="settingsModalTitle">SEO rules</h2>
+          <button type="button" id="settingsModalClose" class="modal-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="settings-rules-tabs" role="tablist">
+            <button type="button" class="rules-tab active" data-rules-tab="product">Products</button>
+            <button type="button" class="rules-tab" data-rules-tab="collection">Collections</button>
+            <button type="button" class="rules-tab" data-rules-tab="article">Blogs</button>
+          </div>
+
+          <div id="rulesPanelProduct" class="rules-panel">
+            <p class="meta cheat-sheet">Tokens: {{handle}} {{product_name}} {{product_type}} {{product_vendor}} {{shop_name}} {{tag1}} {{tag2}} {{tag3}} {{incrementing_number}} {{title}} {{description}} {{description160}} {{image.index}}</p>
+            <div class="settings-grid">
+              <label class="field field-wide"><span>Image filename</span><input type="text" id="rule-product-imageFilename" /></label>
+              <label class="field field-wide"><span>Image alt text</span><input type="text" id="rule-product-imageAlt" /></label>
+              <label class="field field-wide"><span>SEO title</span><input type="text" id="rule-product-seoTitle" /></label>
+              <label class="field field-wide"><span>SEO description</span><input type="text" id="rule-product-seoDescription" /></label>
+              <label class="field field-wide"><span>Tags</span><input type="text" id="rule-product-tags" /></label>
+            </div>
+          </div>
+
+          <div id="rulesPanelCollection" class="rules-panel" hidden>
+            <p class="meta cheat-sheet">Tokens: {{handle}} {{title}} {{shop_name}} {{description}} {{description160}} {{incrementing_number}} {{image.index}}</p>
+            <div class="settings-grid">
+              <label class="field field-wide"><span>Image filename</span><input type="text" id="rule-collection-imageFilename" /></label>
+              <label class="field field-wide"><span>Image alt text</span><input type="text" id="rule-collection-imageAlt" /></label>
+              <label class="field field-wide"><span>SEO title</span><input type="text" id="rule-collection-seoTitle" /></label>
+              <label class="field field-wide"><span>SEO description</span><input type="text" id="rule-collection-seoDescription" /></label>
+            </div>
+          </div>
+
+          <div id="rulesPanelArticle" class="rules-panel" hidden>
+            <p class="meta cheat-sheet">Tokens: {{handle}} {{title}} {{shop_name}} {{tag1}} {{tag2}} {{tag3}} {{description}} {{description160}} {{incrementing_number}} {{image.index}}</p>
+            <div class="settings-grid">
+              <label class="field field-wide"><span>Image filename</span><input type="text" id="rule-article-imageFilename" /></label>
+              <label class="field field-wide"><span>Image alt text</span><input type="text" id="rule-article-imageAlt" /></label>
+              <label class="field field-wide"><span>SEO title</span><input type="text" id="rule-article-seoTitle" /></label>
+              <label class="field field-wide"><span>SEO description</span><input type="text" id="rule-article-seoDescription" /></label>
+              <label class="field field-wide"><span>Tags</span><input type="text" id="rule-article-tags" /></label>
+            </div>
+          </div>
+
+          <div id="rulesMessage" class="message hidden" role="alert"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="saveRulesBtn" class="btn btn-primary">Save rules</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="previewModal" class="modal" hidden>
+      <div class="modal-backdrop"></div>
+      <div class="modal-panel modal-panel-wide" role="dialog" aria-labelledby="previewModalTitle">
+        <div class="modal-header">
+          <div>
+            <h2 id="previewModalTitle">Preview changes</h2>
+            <span id="previewModalCount" class="badge">0 selected</span>
+          </div>
+          <button type="button" id="previewModalClose" class="modal-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body modal-body-table">
+          <div id="previewModalToolbar" class="catalog-toolbar">
+            <button type="button" id="previewSelectAllBtn" class="btn btn-secondary btn-sm">Select all</button>
+            <button type="button" id="previewClearBtn" class="btn btn-secondary btn-sm">Clear selection</button>
+          </div>
+          <div class="table-wrap table-wrap-modal">
+            <table>
+              <thead>
+                <tr>
+                  <th class="col-check"></th>
+                  <th>Type</th>
+                  <th>Resource</th>
+                  <th>Field</th>
+                  <th>Current</th>
+                  <th></th>
+                  <th>Proposed</th>
+                  <th>Used on</th>
+                </tr>
+              </thead>
+              <tbody id="previewModalBody"></tbody>
+            </table>
+          </div>
+          <div id="previewModalMessage" class="message hidden" role="alert"></div>
+          <div id="previewModalProgress" class="progress-wrap" hidden>
+            <div id="previewModalProgressBar" class="progress-bar"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="previewModalActionBtn" class="btn btn-primary" disabled>Sync to Shopify</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="syncLogModal" class="modal" hidden>
+      <div class="modal-backdrop"></div>
+      <div class="modal-panel modal-panel-wide" role="dialog" aria-labelledby="syncLogModalTitle">
+        <div class="modal-header">
+          <h2 id="syncLogModalTitle">Sync log</h2>
+          <button type="button" id="syncLogModalClose" class="modal-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="meta">History of changes synced to Shopify. View details or revert to previous values.</p>
+          <div id="syncLogList" class="sync-log-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="detailModal" class="modal" hidden>
+      <div class="modal-backdrop"></div>
+      <div class="modal-panel" role="dialog" aria-labelledby="detailModalTitle">
+        <div class="modal-header">
+          <h2 id="detailModalTitle">Resource details</h2>
+          <button type="button" id="detailModalClose" class="modal-close" aria-label="Close">&times;</button>
+        </div>
+        <div id="detailModalBody" class="modal-body"></div>
+      </div>
+    </div>
+
+    <div id="imageModal" class="modal" hidden>
+      <div class="modal-backdrop"></div>
+      <div class="modal-panel modal-panel-wide" role="dialog" aria-labelledby="imageModalTitle">
+        <div class="modal-header">
+          <h2 id="imageModalTitle">Images</h2>
+          <button type="button" id="imageModalClose" class="modal-close" aria-label="Close">&times;</button>
+        </div>
+        <div id="imageModalBody" class="modal-body image-modal-body"></div>
+      </div>
+    </div>
+
+    <script src="js/theme.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/shopify-client.js"></script>
+    <script src="js/file-usage-index.js"></script>
+    <script src="js/rules-engine.js"></script>
+    <script src="js/mutations.js"></script>
+    <script src="js/catalog-quality.js"></script>
+    <script src="js/detail-modal.js"></script>
+    <script src="js/image-modal.js"></script>
+    <script src="js/preview-modal.js"></script>
+    <script src="js/sync-log.js"></script>
+    <script src="js/live-catalog.js"></script>
+    <script src="js/shell.js"></script>
+    <script src="js/local.js"></script>
+    <script src="js/settings.js"></script>
+    <script src="js/live.js"></script>
   </body>
 </html>

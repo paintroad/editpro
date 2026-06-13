@@ -2,16 +2,30 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const { execFileSync } = require("child_process");
+const {
+  saveConfig,
+  getPublicSettings,
+  getShopifyCredentials,
+} = require("./lib/config-store");
+const {
+  loadSyncLog,
+  addSyncLogEntry,
+  getSyncLogEntry,
+  updateSyncLogEntry,
+} = require("./lib/sync-log-store");
+const { shopifyGraphql, testConnection } = require("./lib/shopify-client");
 
 const app = express();
 const PORT = process.env.PORT || 3847;
+const BASE_PATH = (process.env.BASE_PATH || "/editpro").replace(/\/$/, "");
+const PUBLIC_DIR = path.join(__dirname, "public");
+const router = express.Router();
 
-app.use(express.json());
-app.use(express.static(path.join(__dirname, "public")));
+app.use(express.json({ limit: "2mb" }));
 
 function listFilesInFolder(folderPath) {
   const entries = fs.readdirSync(folderPath, { withFileTypes: true });
-  const files = entries
+  return entries
     .filter((entry) => entry.isFile())
     .map((entry) => {
       const fullPath = path.join(folderPath, entry.name);
@@ -23,8 +37,6 @@ function listFilesInFolder(folderPath) {
         modified: stat.mtime.toISOString(),
       };
     });
-
-  return files;
 }
 
 function sortFiles(files, sortBy) {
@@ -79,12 +91,7 @@ function buildRenamePlan(folderPath, options) {
       ? String(number).padStart(paddingDigits, "0")
       : String(number);
     const newName = `${prefix}${padded}${suffix}${file.extension}`;
-
-    return {
-      oldName: file.name,
-      newName,
-      extension: file.extension,
-    };
+    return { oldName: file.name, newName, extension: file.extension };
   });
 
   const newNames = new Set(plan.map((item) => item.newName.toLowerCase()));
@@ -126,17 +133,12 @@ function executeRename(folderPath, plan) {
     for (let i = 0; i < toRename.length; i++) {
       const item = toRename[i];
       const tempName = `${tempPrefix}${i}${item.extension}`;
-      const fromPath = path.join(folderPath, item.oldName);
-      const tempPath = path.join(folderPath, tempName);
-      fs.renameSync(fromPath, tempPath);
-      tempMoves.push({ tempPath, finalName: item.newName });
+      fs.renameSync(path.join(folderPath, item.oldName), path.join(folderPath, tempName));
+      tempMoves.push({ tempPath: path.join(folderPath, tempName), finalName: item.newName });
     }
-
     for (const move of tempMoves) {
-      const finalPath = path.join(folderPath, move.finalName);
-      fs.renameSync(move.tempPath, finalPath);
+      fs.renameSync(move.tempPath, path.join(folderPath, move.finalName));
     }
-
     return { renamed: toRename.length, skipped: plan.length - toRename.length };
   } catch (error) {
     for (const move of tempMoves) {
@@ -155,7 +157,90 @@ function executeRename(folderPath, plan) {
   }
 }
 
-app.post("/api/set-folder", (req, res) => {
+router.get("/api/settings", (_req, res) => {
+  try {
+    res.json(getPublicSettings());
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to load settings." });
+  }
+});
+
+router.post("/api/settings", (req, res) => {
+  try {
+    saveConfig(req.body || {});
+    res.json(getPublicSettings());
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to save settings." });
+  }
+});
+
+router.post("/api/shopify/test", async (_req, res) => {
+  try {
+    const { storeDomain, accessToken } = getShopifyCredentials();
+    const shop = await testConnection(storeDomain, accessToken);
+    saveConfig({ shopName: shop.name });
+    res.json({ shop });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Connection test failed." });
+  }
+});
+
+router.post("/api/shopify/graphql", async (req, res) => {
+  try {
+    const { query, variables } = req.body || {};
+    if (!query) {
+      return res.status(400).json({ error: "GraphQL query is required." });
+    }
+    const { storeDomain, accessToken } = getShopifyCredentials();
+    const data = await shopifyGraphql(storeDomain, accessToken, query, variables || {});
+    res.json(data);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Shopify request failed." });
+  }
+});
+
+router.get("/api/sync-log", (_req, res) => {
+  try {
+    res.json({ entries: loadSyncLog() });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to load sync log." });
+  }
+});
+
+router.post("/api/sync-log", (req, res) => {
+  try {
+    const entry = addSyncLogEntry(req.body || {});
+    res.json({ entry });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to save sync log entry." });
+  }
+});
+
+router.patch("/api/sync-log/:id", (req, res) => {
+  try {
+    const entry = updateSyncLogEntry(req.params.id, req.body || {});
+    if (!entry) {
+      return res.status(404).json({ error: "Log entry not found." });
+    }
+    res.json({ entry });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to update sync log entry." });
+  }
+});
+
+router.get("/api/sync-log/:id", (req, res) => {
+  try {
+    const entry = getSyncLogEntry(req.params.id);
+    if (!entry) {
+      return res.status(404).json({ error: "Log entry not found." });
+    }
+    res.json({ entry });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to load sync log entry." });
+  }
+});
+
+router.post("/api/set-folder", (req, res) => {
   try {
     const { folderPath } = req.body;
     if (!folderPath || typeof folderPath !== "string") {
@@ -165,8 +250,7 @@ app.post("/api/set-folder", (req, res) => {
     if (!fs.existsSync(normalized)) {
       return res.status(400).json({ error: "Folder does not exist." });
     }
-    const stat = fs.statSync(normalized);
-    if (!stat.isDirectory()) {
+    if (!fs.statSync(normalized).isDirectory()) {
       return res.status(400).json({ error: "Path is not a folder." });
     }
     const files = listFilesInFolder(normalized);
@@ -176,7 +260,7 @@ app.post("/api/set-folder", (req, res) => {
   }
 });
 
-app.post("/api/preview", (req, res) => {
+router.post("/api/preview", (req, res) => {
   try {
     const { folderPath, startNumber, gap, padding, prefix, suffix, sortBy } = req.body;
     if (!folderPath) {
@@ -196,7 +280,7 @@ app.post("/api/preview", (req, res) => {
   }
 });
 
-app.post("/api/rename", (req, res) => {
+router.post("/api/rename", (req, res) => {
   try {
     const { folderPath, startNumber, gap, padding, prefix, suffix, sortBy } = req.body;
     if (!folderPath) {
@@ -218,20 +302,32 @@ app.post("/api/rename", (req, res) => {
   }
 });
 
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true });
+router.get("/api/health", (_req, res) => {
+  res.json({ ok: true, basePath: BASE_PATH });
+});
+
+router.use(express.static(PUBLIC_DIR));
+router.get("/", (_req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, "index.html"));
+});
+
+app.use(BASE_PATH, router);
+app.get("/", (_req, res) => {
+  res.redirect(`${BASE_PATH}/`);
 });
 
 app.listen(PORT, () => {
-  const url = `http://localhost:${PORT}`;
-  console.log(`EditPro running at ${url}`);
+  const directUrl = `http://localhost:${PORT}${BASE_PATH}/`;
+  const proxyUrl = `http://localhost${BASE_PATH}/`;
+  console.log(`EditPro running at ${directUrl}`);
+  console.log(`With port-80 proxy: ${proxyUrl}`);
   console.log("Press Ctrl+C to stop.");
 
   if (process.platform === "win32") {
     try {
-      execFileSync("cmd", ["/c", "start", "", url], { windowsHide: true });
+      execFileSync("cmd", ["/c", "start", "", directUrl], { windowsHide: true });
     } catch {
-      console.log(`Open ${url} in your browser.`);
+      console.log(`Open ${directUrl} in your browser.`);
     }
   }
 });

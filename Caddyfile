@@ -1,0 +1,19 @@
+# Deprecated — use the unified Caddyfile at:
+# c:\Users\divya\OneDrive\Documents\Caddyfile
+#
+# Reverse proxy for EditPro at http://localhost/editpro
+# and BlogPro at http://localhost/blogpro
+# Requires Caddy: https://caddyserver.com/docs/install#windows
+# Run from Documents: caddy run
+# EditPro: node server.js (port 3847)
+# BlogPro: npm run dev:dashboard in marketpro/ (port 3080)
+
+:80 {
+	handle /editpro* {
+		reverse_proxy 127.0.0.1:3847
+	}
+
+	handle /blogpro* {
+		reverse_proxy 127.0.0.1:3080
+	}
+}
