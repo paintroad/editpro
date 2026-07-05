@@ -161,8 +161,8 @@ window.EditProSyncLog = {
       onComplete: async () => {
         await this.load();
         this.renderList();
-        if (window.EditProLive?.fetchStore) {
-          await EditProLive.fetchStore({ silent: true });
+        if (window.EditProLive?.refetchAfterShopifySync) {
+          await EditProLive.refetchAfterShopifySync();
         }
       },
     });

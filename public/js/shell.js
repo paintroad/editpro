@@ -2,8 +2,14 @@
   const MODULE_KEY = "editpro-module";
 
   const railModules = document.querySelectorAll(".rail-module[data-module]");
+  const seoSharedChrome = document.getElementById("seoSharedChrome");
+  const runAuditBtn = document.getElementById("runAuditBtn");
+  const applyRulesBtn = document.getElementById("applyRulesBtn");
+  const moduleAudit = document.getElementById("module-audit");
   const moduleLocal = document.getElementById("module-local");
   const moduleLive = document.getElementById("module-live");
+  const moduleSquare = document.getElementById("module-square");
+  const moduleRoommap = document.getElementById("module-roommap");
   const connectionModal = document.getElementById("connectionModal");
   const settingsModal = document.getElementById("settingsModal");
 
@@ -11,11 +17,30 @@
     railModules.forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.module === moduleId);
     });
+    if (moduleAudit) {
+      moduleAudit.hidden = moduleId !== "audit";
+    }
     if (moduleLocal) {
       moduleLocal.hidden = moduleId !== "local";
     }
     if (moduleLive) {
       moduleLive.hidden = moduleId !== "live";
+    }
+    if (moduleSquare) {
+      moduleSquare.hidden = moduleId !== "square";
+    }
+    if (moduleRoommap) {
+      moduleRoommap.hidden = moduleId !== "roommap";
+    }
+    const isSeoModule = moduleId === "audit" || moduleId === "live";
+    if (seoSharedChrome) {
+      seoSharedChrome.hidden = !isSeoModule;
+    }
+    if (runAuditBtn) {
+      runAuditBtn.hidden = moduleId !== "audit";
+    }
+    if (applyRulesBtn) {
+      applyRulesBtn.hidden = moduleId !== "live";
     }
     try {
       sessionStorage.setItem(MODULE_KEY, moduleId);
@@ -81,6 +106,13 @@
     }
   }
 
+  function openSeoFilter(tab, ruleKey) {
+    activateModule("live");
+    if (typeof EditProLiveCatalog?.applyRuleFilter === "function") {
+      EditProLiveCatalog.applyRuleFilter(tab, ruleKey);
+    }
+  }
+
   document.getElementById("openSettingsBtn")?.addEventListener("click", openSettingsModal);
 
   document.getElementById("connectionModalClose")?.addEventListener("click", closeConnectionModal);
@@ -122,11 +154,12 @@
     closeSettings: closeSettingsModal,
     openConnection: openConnectionModal,
     closeConnection: closeConnectionModal,
+    openSeoFilter,
     getActiveModule: () => {
       try {
-        return sessionStorage.getItem(MODULE_KEY) || "local";
+        return sessionStorage.getItem(MODULE_KEY) || "audit";
       } catch {
-        return "local";
+        return "audit";
       }
     },
   };
@@ -137,9 +170,9 @@
   EditProSyncLog.init();
   activateRulesTab("product");
 
-  let initialModule = "local";
+  let initialModule = "audit";
   try {
-    initialModule = sessionStorage.getItem(MODULE_KEY) || "local";
+    initialModule = sessionStorage.getItem(MODULE_KEY) || "audit";
   } catch {
     // ignore
   }

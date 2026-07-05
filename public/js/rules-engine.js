@@ -1,4 +1,68 @@
 window.EditProRules = {
+  ROOM_FALLBACKS: [
+    "house",
+    "home",
+    "space",
+    "place",
+    "area",
+    "abode",
+    "sweet home",
+    "lovely house",
+    "room",
+  ],
+
+  resolveRoom(fileId, seedKey, roomFallbackCache = {}) {
+    const mapped = window.EditProImageRoomMap?.getRoom?.(fileId);
+    if (mapped) {
+      return mapped;
+    }
+    if (!roomFallbackCache[seedKey]) {
+      roomFallbackCache[seedKey] = this.pickRandom(this.ROOM_FALLBACKS);
+    }
+    return roomFallbackCache[seedKey];
+  },
+
+  computeTagList(resourceType, resource, rules, ctx, roomFallbackCache) {
+    let tagList;
+    if (rules.tags) {
+      tagList = this.applyTemplate(rules.tags, ctx)
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+    } else {
+      tagList = [...(resource.tags || [])];
+    }
+
+    if (rules.newTags) {
+      const added = this.applyTemplate(rules.newTags, ctx)
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+      for (const tag of added) {
+        if (!tagList.some((existing) => existing.toLowerCase() === tag.toLowerCase())) {
+          tagList.push(tag);
+        }
+      }
+    }
+
+    if (resourceType === "product") {
+      const rooms = new Set();
+      for (const img of resource.media?.nodes || []) {
+        const mappedRoom = window.EditProImageRoomMap?.getRoom?.(img.id);
+        if (mappedRoom) {
+          rooms.add(window.EditProImageRoomMap.roomToTitleCase(mappedRoom));
+        }
+      }
+      for (const roomTag of rooms) {
+        if (!tagList.some((t) => t.toLowerCase() === roomTag.toLowerCase())) {
+          tagList.push(roomTag);
+        }
+      }
+    }
+
+    return tagList;
+  },
+
   applyTemplate(template, context) {
     if (!template) {
       return "";
@@ -19,6 +83,32 @@ window.EditProRules = {
     };
   },
 
+  pickRandom(arr) {
+    if (!Array.isArray(arr) || arr.length === 0) {
+      return "";
+    }
+    return arr[Math.floor(Math.random() * arr.length)];
+  },
+
+  randomContext(resourceType, resource, descriptionPhrases) {
+    const phrases = Array.isArray(descriptionPhrases) ? descriptionPhrases : [];
+    const tags = resourceType === "collection"
+      ? []
+      : (Array.isArray(resource?.tags) ? resource.tags : []);
+    return {
+      random_tag: this.pickRandom(tags),
+      random_description: this.pickRandom(phrases),
+    };
+  },
+
+  mergeContext(base, extra) {
+    return { ...base, ...extra };
+  },
+
+  templateHasRandomTokens(template) {
+    return /\{\{\s*random_(tag|description)\s*\}\}/.test(String(template || ""));
+  },
+
   imageNumberTokens(imageIndex) {
     if (imageIndex > 0) {
       return {
@@ -32,10 +122,13 @@ window.EditProRules = {
     };
   },
 
-  productContext(product, shopName, image, imageIndex) {
+  productContext(product, shopName, image, imageIndex, roomFallbackCache = {}) {
     const description = EditProUtils.stripHtml(product.descriptionHtml);
     const title = product.title || "";
     const productType = product.productType || "";
+    const fileId = image?.id || product.media?.nodes?.[0]?.id || "";
+    const idx = imageIndex > 0 ? imageIndex : 1;
+    const room = this.resolveRoom(fileId, `${product.id}:${idx}`, roomFallbackCache);
     return {
       title,
       handle: product.handle || "",
@@ -48,41 +141,74 @@ window.EditProRules = {
       product_type: productType,
       product_vendor: product.vendor || "",
       shop_name: shopName || "",
+      room,
       ...this.imageNumberTokens(imageIndex),
       "image.alt": image?.alt || "",
       "image.filename": EditProUtils.filenameFromUrl(image?.image?.url) || "",
     };
   },
 
-  collectionContext(collection, shopName) {
+  collectionContext(collection, shopName, roomFallbackCache = {}) {
     const description = EditProUtils.stripHtml(collection.descriptionHtml);
+    const title = collection.title || "";
+    const fileId = collection.image?.id || "";
+    const room = this.resolveRoom(fileId, `${collection.id}:1`, roomFallbackCache);
     return {
-      title: collection.title || "",
+      title,
       handle: collection.handle || "",
+      collection_name: title,
       description,
       description160: EditProUtils.truncate(description, 160),
       shopName: shopName || "",
       shop_name: shopName || "",
+      room,
       ...this.imageNumberTokens(1),
       "image.alt": collection.image?.alt || "",
       "image.filename": EditProUtils.filenameFromUrl(collection.image?.url) || "",
     };
   },
 
-  articleContext(article, shopName) {
-    const description = EditProUtils.stripHtml(article.summary || article.body);
+  articleContext(article, shopName, roomFallbackCache = {}) {
+    const description = EditProUtils.stripHtml(article.summary);
+    const title = article.title || "";
+    const fileId = article.image?.id || "";
+    const room = this.resolveRoom(fileId, `${article.id}:1`, roomFallbackCache);
     return {
-      title: article.title || "",
+      title,
       handle: article.handle || "",
+      blog_name: title,
+      blog_title: article.blog?.title || "",
       ...this.tagTokens(article.tags),
       description,
       description160: EditProUtils.truncate(description, 160),
       shopName: shopName || "",
       shop_name: shopName || "",
+      room,
       ...this.imageNumberTokens(1),
       "image.alt": article.image?.alt || "",
       "image.filename": EditProUtils.filenameFromUrl(article.image?.url) || "",
     };
+  },
+
+  /**
+   * Spaces → hyphens; strip symbols unsafe for filenames; lowercase.
+   * Keeps letters, digits, hyphen, underscore, and period.
+   */
+  sanitizeField(value) {
+    if (!value) {
+      return "";
+    }
+    return String(value)
+      .toLowerCase()
+      .replace(/\s+/g, "-")
+      .replace(/[^a-z0-9._-]/g, "")
+      .replace(/-+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  },
+
+  sanitizeFilename(value, currentFilename) {
+    const sanitized = this.sanitizeField(value);
+    return this.ensureExtension(sanitized, currentFilename).toLowerCase();
   },
 
   ensureExtension(filename, currentFilename) {
@@ -126,13 +252,20 @@ window.EditProRules = {
     return annotated;
   },
 
-  buildProductChanges(product, rules, shopName) {
+  buildProductChanges(product, rules, shopName, descriptionPhrases) {
     const changes = [];
-    const base = this.productContext(product, shopName, null, 0);
+    const phrases = descriptionPhrases ?? window.EditProSettings?.descriptionPhrases;
+    const roomFallbackCache = {};
+    const random = this.randomContext("product", product, phrases);
+    const base = this.mergeContext(
+      this.productContext(product, shopName, null, 0, roomFallbackCache),
+      random
+    );
 
     const seoTitle = this.applyTemplate(rules.seoTitle, base);
     const seoDescription = this.applyTemplate(rules.seoDescription, base);
-    const tags = this.applyTemplate(rules.tags, base);
+    const tagList = this.computeTagList("product", product, rules, base, roomFallbackCache);
+    const tags = tagList.join(", ");
 
     if ((product.seo?.title || "") !== seoTitle) {
       changes.push({
@@ -161,8 +294,7 @@ window.EditProRules = {
     }
 
     const currentTags = Array.isArray(product.tags) ? product.tags.join(", ") : "";
-    if (currentTags !== tags && rules.tags) {
-      const tagList = tags.split(",").map((t) => t.trim()).filter(Boolean);
+    if (currentTags !== tags) {
       changes.push({
         resourceType: "product",
         resourceId: product.id,
@@ -181,9 +313,12 @@ window.EditProRules = {
         return;
       }
       const currentFilename = EditProUtils.filenameFromUrl(image.image?.url);
-      const ctx = this.productContext(product, shopName, image, index + 1);
+      const ctx = this.mergeContext(
+        this.productContext(product, shopName, image, index + 1, roomFallbackCache),
+        random
+      );
       const alt = this.applyTemplate(rules.imageAlt, ctx);
-      const filename = this.ensureExtension(
+      const filename = this.sanitizeFilename(
         this.applyTemplate(rules.imageFilename, ctx),
         currentFilename
       );
@@ -218,9 +353,15 @@ window.EditProRules = {
     return changes;
   },
 
-  buildCollectionChanges(collection, rules, shopName) {
+  buildCollectionChanges(collection, rules, shopName, descriptionPhrases) {
     const changes = [];
-    const ctx = this.collectionContext(collection, shopName);
+    const phrases = descriptionPhrases ?? window.EditProSettings?.descriptionPhrases;
+    const roomFallbackCache = {};
+    const random = this.randomContext("collection", collection, phrases);
+    const ctx = this.mergeContext(
+      this.collectionContext(collection, shopName, roomFallbackCache),
+      random
+    );
     const seoTitle = this.applyTemplate(rules.seoTitle, ctx);
     const seoDescription = this.applyTemplate(rules.seoDescription, ctx);
 
@@ -254,7 +395,7 @@ window.EditProRules = {
     if (fileId) {
       const currentFilename = EditProUtils.filenameFromUrl(collection.image?.url);
       const alt = this.applyTemplate(rules.imageAlt, ctx);
-      const filename = this.ensureExtension(
+      const filename = this.sanitizeFilename(
         this.applyTemplate(rules.imageFilename, ctx),
         currentFilename
       );
@@ -289,12 +430,19 @@ window.EditProRules = {
     return changes;
   },
 
-  buildArticleChanges(article, rules, shopName) {
+  buildArticleChanges(article, rules, shopName, descriptionPhrases) {
     const changes = [];
-    const ctx = this.articleContext(article, shopName);
+    const phrases = descriptionPhrases ?? window.EditProSettings?.descriptionPhrases;
+    const roomFallbackCache = {};
+    const random = this.randomContext("article", article, phrases);
+    const ctx = this.mergeContext(
+      this.articleContext(article, shopName, roomFallbackCache),
+      random
+    );
     const seoTitle = this.applyTemplate(rules.seoTitle, ctx);
     const seoDescription = this.applyTemplate(rules.seoDescription, ctx);
-    const tags = this.applyTemplate(rules.tags, ctx);
+    const tagList = this.computeTagList("article", article, rules, ctx, roomFallbackCache);
+    const tags = tagList.join(", ");
 
     if ((article.seo?.title || "") !== seoTitle) {
       changes.push({
@@ -337,8 +485,7 @@ window.EditProRules = {
     }
 
     const currentTags = Array.isArray(article.tags) ? article.tags.join(", ") : "";
-    if (currentTags !== tags && rules.tags) {
-      const tagList = tags.split(",").map((t) => t.trim()).filter(Boolean);
+    if (currentTags !== tags) {
       changes.push({
         resourceType: "article",
         resourceId: article.id,
@@ -355,7 +502,7 @@ window.EditProRules = {
     if (fileId) {
       const currentFilename = EditProUtils.filenameFromUrl(article.image?.url);
       const alt = this.applyTemplate(rules.imageAlt, ctx);
-      const filename = this.ensureExtension(
+      const filename = this.sanitizeFilename(
         this.applyTemplate(rules.imageFilename, ctx),
         currentFilename
       );
@@ -475,24 +622,31 @@ window.EditProRules = {
     const productIds = selection.productIds;
     const collectionIds = selection.collectionIds;
     const articleIds = selection.articleIds;
+    const descriptionPhrases = window.EditProSettings?.descriptionPhrases;
 
     for (const product of storeData.products || []) {
       if (productIds && !productIds.has(product.id)) {
         continue;
       }
-      changes.push(...this.buildProductChanges(product, rules.product, shopName));
+      changes.push(
+        ...this.buildProductChanges(product, rules.product, shopName, descriptionPhrases)
+      );
     }
     for (const collection of storeData.collections || []) {
       if (collectionIds && !collectionIds.has(collection.id)) {
         continue;
       }
-      changes.push(...this.buildCollectionChanges(collection, rules.collection, shopName));
+      changes.push(
+        ...this.buildCollectionChanges(collection, rules.collection, shopName, descriptionPhrases)
+      );
     }
     for (const article of storeData.articles || []) {
       if (articleIds && !articleIds.has(article.id)) {
         continue;
       }
-      changes.push(...this.buildArticleChanges(article, rules.article, shopName));
+      changes.push(
+        ...this.buildArticleChanges(article, rules.article, shopName, descriptionPhrases)
+      );
     }
     return changes.map((c) => this.annotateChange(c, fileUsageIndex));
   },

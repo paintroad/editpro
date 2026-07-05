@@ -198,6 +198,20 @@ window.EditProMutations = {
     return serialized;
   },
 
+  FILE_BATCH_SIZE: 10,
+  FILE_CONCURRENCY: 3,
+  RESOURCE_CONCURRENCY: 4,
+
+  isThrottleError(message) {
+    const m = String(message || "").toLowerCase();
+    return (
+      m.includes("throttl") ||
+      m.includes("rate limit") ||
+      m.includes("too many request") ||
+      m.includes("exceeded")
+    );
+  },
+
   async runMutation(change) {
     if (change.mutation === "fileUpdate") {
       const data = await EditProShopify.graphql(
@@ -264,5 +278,187 @@ window.EditProMutations = {
         throw new Error(errors.map((e) => e.message).join("; "));
       }
     }
+  },
+
+  async runMutationWithRetry(change) {
+    try {
+      await this.runMutation(change);
+    } catch (error) {
+      if (this.isThrottleError(error.message)) {
+        await EditProUtils.sleep(1000);
+        await this.runMutation(change);
+        return;
+      }
+      throw error;
+    }
+  },
+
+  parseFileErrorIndex(field) {
+    if (!Array.isArray(field)) {
+      return null;
+    }
+    const filesIdx = field.indexOf("files");
+    if (filesIdx < 0 || field[filesIdx + 1] == null) {
+      return null;
+    }
+    const idx = Number(field[filesIdx + 1]);
+    return Number.isNaN(idx) ? null : idx;
+  },
+
+  async runFileUpdatesBatch(changes) {
+    if (!changes.length) {
+      return { errors: [], succeeded: [] };
+    }
+
+    const runOnce = async () => {
+      const data = await EditProShopify.graphql(
+        `mutation FileUpdate($files: [FileUpdateInput!]!) {
+          fileUpdate(files: $files) {
+            userErrors { field message }
+          }
+        }`,
+        { files: changes.map((c) => c.fileInput) }
+      );
+      return data.fileUpdate?.userErrors || [];
+    };
+
+    let userErrors;
+    try {
+      userErrors = await runOnce();
+    } catch (error) {
+      if (this.isThrottleError(error.message)) {
+        await EditProUtils.sleep(1000);
+        try {
+          userErrors = await runOnce();
+        } catch (retryError) {
+          const message = retryError.message || String(retryError);
+          return {
+            errors: changes.map((change) => ({
+              resourceTitle: change.resourceTitle,
+              field: change.field,
+              message,
+            })),
+            succeeded: [],
+          };
+        }
+      } else {
+        const message = error.message || String(error);
+        return {
+          errors: changes.map((change) => ({
+            resourceTitle: change.resourceTitle,
+            field: change.field,
+            message,
+          })),
+          succeeded: [],
+        };
+      }
+    }
+
+    if (!userErrors.length) {
+      return { errors: [], succeeded: changes };
+    }
+
+    const messageByIndex = new Map();
+    for (const err of userErrors) {
+      const idx = this.parseFileErrorIndex(err.field);
+      if (idx != null && changes[idx]) {
+        const prev = messageByIndex.get(idx);
+        messageByIndex.set(idx, prev ? `${prev}; ${err.message}` : err.message);
+      }
+    }
+
+    if (messageByIndex.size === 0) {
+      const message = userErrors.map((e) => e.message).join("; ");
+      return {
+        errors: changes.map((change) => ({
+          resourceTitle: change.resourceTitle,
+          field: change.field,
+          message,
+        })),
+        succeeded: [],
+      };
+    }
+
+    const errors = [];
+    const succeeded = [];
+    changes.forEach((change, index) => {
+      if (messageByIndex.has(index)) {
+        errors.push({
+          resourceTitle: change.resourceTitle,
+          field: change.field,
+          message: messageByIndex.get(index),
+        });
+      } else {
+        succeeded.push(change);
+      }
+    });
+    return { errors, succeeded };
+  },
+
+  async mapPool(items, concurrency, worker) {
+    if (!items.length) {
+      return;
+    }
+    let next = 0;
+    const run = async () => {
+      while (next < items.length) {
+        const index = next;
+        next += 1;
+        await worker(items[index], index);
+      }
+    };
+    const poolSize = Math.min(concurrency, items.length);
+    await Promise.all(Array.from({ length: poolSize }, () => run()));
+  },
+
+  chunkArray(items, size) {
+    const chunks = [];
+    for (let i = 0; i < items.length; i += size) {
+      chunks.push(items.slice(i, i + size));
+    }
+    return chunks;
+  },
+
+  async runChanges(changes, { onProgress } = {}) {
+    const fileChanges = changes.filter((c) => c.mutation === "fileUpdate");
+    const otherChanges = changes.filter((c) => c.mutation !== "fileUpdate");
+    const fileChunks = this.chunkArray(fileChanges, this.FILE_BATCH_SIZE);
+    const totalUnits = otherChanges.length + fileChunks.length;
+    let done = 0;
+    const errors = [];
+    const succeeded = [];
+
+    const tick = () => {
+      done += 1;
+      onProgress?.(done, Math.max(totalUnits, 1));
+    };
+
+    await Promise.all([
+      this.mapPool(otherChanges, this.RESOURCE_CONCURRENCY, async (change) => {
+        try {
+          await this.runMutationWithRetry(change);
+          succeeded.push(change);
+        } catch (error) {
+          errors.push({
+            resourceTitle: change.resourceTitle,
+            field: change.field,
+            message: error.message || String(error),
+          });
+        }
+        tick();
+      }),
+      this.mapPool(fileChunks, this.FILE_CONCURRENCY, async (chunk) => {
+        const result = await this.runFileUpdatesBatch(chunk);
+        errors.push(...result.errors);
+        succeeded.push(...result.succeeded);
+        tick();
+      }),
+    ]);
+
+    if (totalUnits === 0) {
+      onProgress?.(1, 1);
+    }
+
+    return { errors, succeeded };
   },
 };

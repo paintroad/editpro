@@ -31,13 +31,25 @@
           <img src="editpro-logo-light.png" alt="EditPro" class="rail-logo" id="railLogo" />
         </div>
         <nav class="rail-modules">
-          <button type="button" class="rail-module active" data-module="local" title="Local Editing" aria-label="Local Editing">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
-            <span class="rail-module-label">Local Editing</span>
+          <button type="button" class="rail-module active" data-module="audit" title="SEO Audit" aria-label="SEO Audit">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+            <span class="rail-module-label">SEO Audit</span>
           </button>
           <button type="button" class="rail-module" data-module="live" title="SEO Engine" aria-label="SEO Engine">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="M20 20l-3.5-3.5"/><path stroke-linecap="round" d="M8 11h6M11 8v6"/></svg>
             <span class="rail-module-label">SEO Engine</span>
+          </button>
+          <button type="button" class="rail-module" data-module="local" title="Local Editing" aria-label="Local Editing">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
+            <span class="rail-module-label">Local Editing</span>
+          </button>
+          <button type="button" class="rail-module" data-module="square" title="Square images" aria-label="Square images">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="1"/><rect x="7" y="7" width="10" height="10" rx="0.5"/></svg>
+            <span class="rail-module-label">Square images</span>
+          </button>
+          <button type="button" class="rail-module" data-module="roommap" title="Image Room Map" aria-label="Image Room Map">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 10.5V19a1 1 0 001 1h6v-6.5H3zm8 0V20h6a1 1 0 001-1v-8.5h-7zm8-1.5V19a1 1 0 01-1 1h-2V9H19a1 1 0 011 1v1z"/><path stroke-linecap="round" stroke-linejoin="round" d="M3 9.5L12 4l9 5.5"/></svg>
+            <span class="rail-module-label">Image Room Map</span>
           </button>
         </nav>
         <button type="button" id="sidebarThemeToggle" class="rail-module rail-theme" aria-label="Switch to dark mode" title="Dark mode">
@@ -47,7 +59,51 @@
       </aside>
 
       <main class="main-content">
-        <div id="module-local" class="module-panel">
+        <div id="fetchOverlay" class="fetch-overlay" hidden aria-live="polite">
+          <div class="fetch-overlay-panel">
+            <p id="fetchOverlayTitle" class="fetch-overlay-title">Fetching store data</p>
+            <p class="fetch-overlay-status">Please wait…</p>
+            <button type="button" id="fetchStopBtn" class="btn btn-secondary btn-sm fetch-overlay-stop">Stop fetching</button>
+          </div>
+        </div>
+
+        <div id="seoSharedChrome" class="seo-shared-chrome" hidden>
+          <div class="seo-action-bar">
+            <span id="storeNameLabel" class="store-name-label">No store connected</span>
+            <div class="seo-action-cluster">
+              <button type="button" id="storeActionBtn" class="btn btn-secondary btn-sm">Connect Store</button>
+              <button type="button" id="runAuditBtn" class="btn btn-secondary btn-sm">Run Audit again</button>
+              <button type="button" id="openSettingsBtn" class="btn btn-secondary btn-sm">Settings</button>
+              <button type="button" id="openSyncLogBtn" class="btn btn-secondary btn-sm">Logs</button>
+              <button type="button" id="applyRulesBtn" class="btn btn-primary btn-sm" disabled hidden>Apply rules</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="module-audit" class="module-panel audit-module">
+          <div id="auditEmpty" class="catalog-empty">Connect your store and fetch catalog data to run an SEO audit.</div>
+          <div id="auditDashboard" class="audit-dashboard" hidden>
+            <section class="card audit-hero">
+              <div class="audit-hero-content">
+                <div>
+                  <h2>Site score</h2>
+                  <p class="meta">Overall SEO health across products, collections, and blogs</p>
+                </div>
+                <div class="audit-hero-score">
+                  <div id="auditSiteScoreRing" class="audit-score-ring score-fair" style="--audit-score: 0">
+                    <span id="auditSiteScore" class="audit-site-score">0</span>
+                  </div>
+                  <span class="audit-score-suffix">/ 100</span>
+                </div>
+              </div>
+            </section>
+            <section class="card audit-category" id="auditProducts"></section>
+            <section class="card audit-category" id="auditCollections"></section>
+            <section class="card audit-category" id="auditArticles"></section>
+          </div>
+        </div>
+
+        <div id="module-local" class="module-panel" hidden>
           <section class="card">
             <h2>1. Choose folder</h2>
             <div class="folder-row">
@@ -128,24 +184,6 @@
         <div id="module-live" class="module-panel seo-module" hidden>
           <div id="liveMessage" class="message seo-toast hidden" role="alert"></div>
 
-          <div id="fetchOverlay" class="fetch-overlay" hidden aria-live="polite">
-            <div class="fetch-overlay-panel">
-              <p id="fetchOverlayTitle" class="fetch-overlay-title">Fetching products</p>
-              <p id="fetchOverlayStats" class="fetch-overlay-stats">0 products · 0 collections</p>
-              <button type="button" id="fetchStopBtn" class="btn btn-secondary btn-sm fetch-overlay-stop">Stop fetching</button>
-            </div>
-          </div>
-
-          <div class="seo-action-bar">
-            <span id="storeNameLabel" class="store-name-label">No store connected</span>
-            <div class="seo-action-cluster">
-              <button type="button" id="storeActionBtn" class="btn btn-secondary btn-sm">Connect Store</button>
-              <button type="button" id="openSettingsBtn" class="btn btn-secondary btn-sm">Settings</button>
-              <button type="button" id="openSyncLogBtn" class="btn btn-secondary btn-sm">Logs</button>
-              <button type="button" id="applyRulesBtn" class="btn btn-primary btn-sm" disabled>Apply rules</button>
-            </div>
-          </div>
-
           <div class="seo-resource-tabs" role="tablist">
             <button type="button" class="resource-tab active" data-live-tab="products" role="tab">
               Products <span id="tabCountProducts" class="tab-count">0</span>
@@ -170,11 +208,174 @@
             </div>
           </div>
 
+          <div id="catalogSelectAllBar" class="catalog-select-all-bar" hidden>
+            <span id="catalogSelectAllBarText"></span>
+            <button type="button" id="catalogSelectAllFilterBtn" class="btn btn-link btn-sm">Select all items for this filter</button>
+          </div>
+
           <div id="catalogList" class="seo-list-scroll">
             <div class="catalog-empty">Fetch your store to browse products, collections, and blog articles.</div>
           </div>
         </div>
+
+        <div id="module-square" class="module-panel" hidden>
+          <div id="squareScanOverlay" class="fetch-overlay" hidden aria-live="polite">
+            <div class="fetch-overlay-panel">
+              <p class="fetch-overlay-title">Scanning catalog</p>
+              <p class="fetch-overlay-stats">Analyzing first image of each product folder…</p>
+            </div>
+          </div>
+
+          <section class="card">
+            <h2>1. Catalog folder</h2>
+            <div class="folder-row">
+              <input type="text" id="squareCatalogPath" placeholder="Paste full path (e.g. C:\Paintroad\Catalog\Optimised Catalog)" />
+              <button type="button" id="squareUsePathBtn" class="btn btn-secondary">Use path</button>
+            </div>
+            <p id="squareCatalogMeta" class="meta">Default: C:\Paintroad\Catalog\Optimised Catalog</p>
+          </section>
+
+          <section class="card">
+            <div class="square-action-bar">
+              <div class="square-action-info">
+                <h2>2. Square paintings</h2>
+                <span id="squareCountBadge" class="badge">0 square</span>
+                <p id="squareLastScanned" class="meta square-last-scanned">No scan yet.</p>
+              </div>
+              <div class="square-action-cluster">
+                <a id="squareDownloadLink" class="btn btn-secondary btn-sm square-download-link disabled" href="#" download="square-paintings.xlsx" hidden>Download Excel</a>
+                <button type="button" id="squareRunScanBtn" class="btn btn-primary">Run scan</button>
+              </div>
+            </div>
+            <div id="squareMessage" class="message hidden" role="alert"></div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Product ID</th>
+                    <th>Aspect ratio</th>
+                  </tr>
+                </thead>
+                <tbody id="squareResultsBody">
+                  <tr class="empty-row">
+                    <td colspan="3">Run a scan to list product folders with square paintings.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <div id="module-roommap" class="module-panel" hidden>
+          <div id="roomMapScanOverlay" class="fetch-overlay" hidden aria-live="polite">
+            <div class="fetch-overlay-panel">
+              <p class="fetch-overlay-title">Mapping rooms</p>
+              <p id="roomMapScanProgress" class="fetch-overlay-stats">Please wait…</p>
+            </div>
+          </div>
+
+          <section class="card">
+            <div class="room-map-action-bar">
+              <div class="room-map-action-info">
+                <h2>Image room coverage</h2>
+                <p id="roomMapCoverage" class="meta">0 / 0 images mapped</p>
+                <span id="roomMapStatusBadge" class="badge room-map-status-badge room-map-status-badge--incomplete">Incomplete</span>
+              </div>
+              <div class="room-map-action-cluster">
+                <button type="button" id="roomMapScanBtn" class="btn btn-primary" disabled>Map unmapped images</button>
+              </div>
+            </div>
+            <div id="roomMapMessage" class="message hidden" role="alert"></div>
+          </section>
+
+          <section class="card">
+            <h2>Ollama</h2>
+            <div class="room-map-ollama-status-row">
+              <div class="room-map-ollama-status-info">
+                <span id="roomMapOllamaStatusBadge" class="room-map-ollama-pill room-map-ollama-pill--checking">Checking…</span>
+                <p id="roomMapOllamaStatusText" class="meta room-map-ollama-status-text">Checking Ollama status…</p>
+              </div>
+              <div class="room-map-ollama-status-actions">
+                <button type="button" id="roomMapOllamaRefreshBtn" class="btn btn-secondary btn-sm">Refresh</button>
+                <button type="button" id="roomMapOllamaStartBtn" class="btn btn-secondary btn-sm">Start Ollama</button>
+                <button type="button" id="roomMapOllamaStopBtn" class="btn btn-secondary btn-sm">Stop Ollama</button>
+              </div>
+            </div>
+            <p class="meta">Requires Ollama running locally with a vision model (e.g. <code>ollama pull gemma3:4b</code>).</p>
+            <div class="settings-grid room-map-ollama-grid">
+              <label class="field field-wide">
+                <span>Ollama host</span>
+                <input type="text" id="roomMapOllamaHost" placeholder="http://localhost:11434" />
+              </label>
+              <label class="field field-wide">
+                <span>Vision model</span>
+                <input type="text" id="roomMapOllamaModel" placeholder="gemma3:4b" />
+              </label>
+            </div>
+            <button type="button" id="roomMapSaveOllamaBtn" class="btn btn-secondary btn-sm">Save Ollama settings</button>
+          </section>
+
+          <section class="card">
+            <div class="room-map-table-toolbar">
+              <input type="search" id="roomMapSearch" class="filter-search" placeholder="Search by product name…" />
+              <label class="room-map-toggle">
+                <input type="checkbox" id="roomMapUnmappedOnly" />
+                Show unmapped only
+              </label>
+              <select id="roomMapSort">
+                <option value="title-asc">Title A–Z</option>
+                <option value="room-asc">Room A–Z</option>
+                <option value="unmapped-first">Unmapped first</option>
+              </select>
+            </div>
+            <p id="roomMapEmpty" class="catalog-empty" hidden></p>
+            <div id="roomMapTableWrap" class="table-wrap room-map-table-wrap">
+              <table class="room-map-table">
+                <thead>
+                  <tr>
+                    <th>Image</th>
+                    <th>Product / resource</th>
+                    <th>#</th>
+                    <th>Room</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="roomMapTableBody">
+                  <tr class="empty-row">
+                    <td colspan="5">Fetch catalog data to list images.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
       </main>
+    </div>
+
+    <div id="descriptionPhrasesModal" class="modal" hidden>
+      <div class="modal-backdrop"></div>
+      <div class="modal-panel modal-panel-wide" role="dialog" aria-labelledby="descriptionPhrasesModalTitle">
+        <div class="modal-header">
+          <h2 id="descriptionPhrasesModalTitle">Description phrases</h2>
+          <button type="button" id="descriptionPhrasesModalClose" class="modal-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="meta">
+            These phrases power the <code>{{random_description}}</code> token. One phrase is chosen at random when rules are applied.
+          </p>
+          <div class="phrases-add-row">
+            <input type="text" id="newDescriptionPhraseInput" placeholder="Brighten your space with the vibrant" />
+            <button type="button" id="addDescriptionPhraseBtn" class="btn btn-secondary">Add phrase</button>
+          </div>
+          <div id="descriptionPhrasesList" class="phrases-list" role="list"></div>
+          <div id="descriptionPhrasesMessage" class="message hidden" role="alert"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="cancelDescriptionPhrasesBtn" class="btn btn-secondary">Cancel</button>
+          <button type="button" id="saveDescriptionPhrasesBtn" class="btn btn-primary">Save phrases</button>
+        </div>
+      </div>
     </div>
 
     <div id="connectionModal" class="modal" hidden>
@@ -227,34 +428,101 @@
           </div>
 
           <div id="rulesPanelProduct" class="rules-panel">
-            <p class="meta cheat-sheet">Tokens: {{handle}} {{product_name}} {{product_type}} {{product_vendor}} {{shop_name}} {{tag1}} {{tag2}} {{tag3}} {{incrementing_number}} {{title}} {{description}} {{description160}} {{image.index}}</p>
+            <p class="meta cheat-sheet cheat-sheet-row">
+              <span>Tokens: {{handle}} {{product_name}} {{product_type}} {{product_vendor}} {{shop_name}} {{tag1}} {{tag2}} {{tag3}} {{random_tag}} {{room}} {{incrementing_number}} {{title}} {{description}} {{description160}} {{random_description}} {{image.index}}</span>
+              <button type="button" class="btn btn-secondary btn-sm manage-phrases-btn">Manage phrases</button>
+            </p>
             <div class="settings-grid">
-              <label class="field field-wide"><span>Image filename</span><input type="text" id="rule-product-imageFilename" /></label>
-              <label class="field field-wide"><span>Image alt text</span><input type="text" id="rule-product-imageAlt" /></label>
-              <label class="field field-wide"><span>SEO title</span><input type="text" id="rule-product-seoTitle" /></label>
-              <label class="field field-wide"><span>SEO description</span><input type="text" id="rule-product-seoDescription" /></label>
+              <label class="field field-wide">
+                <span>Image filename</span>
+                <input type="text" id="rule-product-imageFilename" />
+                <small class="field-hint">Use descriptive hyphenated filenames matching this template (no length limit).</small>
+              </label>
+              <label class="field field-wide">
+                <span>Image alt text</span>
+                <input type="text" id="rule-product-imageAlt" />
+                <small class="field-hint">Alt text must not be empty. Keep under 125 characters.</small>
+              </label>
+              <label class="field field-wide">
+                <span>SEO title</span>
+                <input type="text" id="rule-product-seoTitle" />
+                <small class="field-hint">SEO title max 60 characters. Under 30 characters is flagged as a warning.</small>
+              </label>
+              <label class="field field-wide">
+                <span>SEO description</span>
+                <input type="text" id="rule-product-seoDescription" />
+                <small class="field-hint">SEO description max 160 characters. Empty descriptions are flagged as a warning.</small>
+              </label>
               <label class="field field-wide"><span>Tags</span><input type="text" id="rule-product-tags" /></label>
+              <label class="field field-wide">
+                <span>New tags</span>
+                <input type="text" id="rule-product-newTags" />
+                <small class="field-hint">Additive only — tokens here are appended to existing tags without removing them.</small>
+              </label>
             </div>
           </div>
 
           <div id="rulesPanelCollection" class="rules-panel" hidden>
-            <p class="meta cheat-sheet">Tokens: {{handle}} {{title}} {{shop_name}} {{description}} {{description160}} {{incrementing_number}} {{image.index}}</p>
+            <p class="meta cheat-sheet cheat-sheet-row">
+              <span>Tokens: {{handle}} {{collection_name}} {{title}} {{shop_name}} {{description}} {{description160}} {{room}} {{random_description}} {{incrementing_number}} {{image.index}}</span>
+              <button type="button" class="btn btn-secondary btn-sm manage-phrases-btn">Manage phrases</button>
+            </p>
             <div class="settings-grid">
-              <label class="field field-wide"><span>Image filename</span><input type="text" id="rule-collection-imageFilename" /></label>
-              <label class="field field-wide"><span>Image alt text</span><input type="text" id="rule-collection-imageAlt" /></label>
-              <label class="field field-wide"><span>SEO title</span><input type="text" id="rule-collection-seoTitle" /></label>
-              <label class="field field-wide"><span>SEO description</span><input type="text" id="rule-collection-seoDescription" /></label>
+              <label class="field field-wide">
+                <span>Image filename</span>
+                <input type="text" id="rule-collection-imageFilename" />
+                <small class="field-hint">Use descriptive hyphenated filenames matching this template (no length limit).</small>
+              </label>
+              <label class="field field-wide">
+                <span>Image alt text</span>
+                <input type="text" id="rule-collection-imageAlt" />
+                <small class="field-hint">Alt text must not be empty. Keep under 125 characters.</small>
+              </label>
+              <label class="field field-wide">
+                <span>SEO title</span>
+                <input type="text" id="rule-collection-seoTitle" />
+                <small class="field-hint">SEO title max 60 characters. Under 30 characters is flagged as a warning.</small>
+              </label>
+              <label class="field field-wide">
+                <span>SEO description</span>
+                <input type="text" id="rule-collection-seoDescription" />
+                <small class="field-hint">SEO description max 160 characters. Empty descriptions are flagged as a warning.</small>
+              </label>
             </div>
           </div>
 
           <div id="rulesPanelArticle" class="rules-panel" hidden>
-            <p class="meta cheat-sheet">Tokens: {{handle}} {{title}} {{shop_name}} {{tag1}} {{tag2}} {{tag3}} {{description}} {{description160}} {{incrementing_number}} {{image.index}}</p>
+            <p class="meta cheat-sheet cheat-sheet-row">
+              <span>Tokens: {{handle}} {{blog_name}} {{blog_title}} {{title}} {{shop_name}} {{tag1}} {{tag2}} {{tag3}} {{random_tag}} {{room}} {{description}} {{description160}} {{random_description}} {{incrementing_number}} {{image.index}}</span>
+              <button type="button" class="btn btn-secondary btn-sm manage-phrases-btn">Manage phrases</button>
+            </p>
             <div class="settings-grid">
-              <label class="field field-wide"><span>Image filename</span><input type="text" id="rule-article-imageFilename" /></label>
-              <label class="field field-wide"><span>Image alt text</span><input type="text" id="rule-article-imageAlt" /></label>
-              <label class="field field-wide"><span>SEO title</span><input type="text" id="rule-article-seoTitle" /></label>
-              <label class="field field-wide"><span>SEO description</span><input type="text" id="rule-article-seoDescription" /></label>
+              <label class="field field-wide">
+                <span>Image filename</span>
+                <input type="text" id="rule-article-imageFilename" />
+                <small class="field-hint">Use descriptive hyphenated filenames matching this template (no length limit).</small>
+              </label>
+              <label class="field field-wide">
+                <span>Image alt text</span>
+                <input type="text" id="rule-article-imageAlt" />
+                <small class="field-hint">Alt text must not be empty. Keep under 125 characters.</small>
+              </label>
+              <label class="field field-wide">
+                <span>SEO title</span>
+                <input type="text" id="rule-article-seoTitle" />
+                <small class="field-hint">SEO title max 60 characters. Under 30 characters is flagged as a warning.</small>
+              </label>
+              <label class="field field-wide">
+                <span>SEO description</span>
+                <input type="text" id="rule-article-seoDescription" />
+                <small class="field-hint">SEO description max 160 characters. Empty descriptions are flagged as a warning.</small>
+              </label>
               <label class="field field-wide"><span>Tags</span><input type="text" id="rule-article-tags" /></label>
+              <label class="field field-wide">
+                <span>New tags</span>
+                <input type="text" id="rule-article-newTags" />
+                <small class="field-hint">Additive only — tokens here are appended to existing tags without removing them.</small>
+              </label>
             </div>
           </div>
 
@@ -281,6 +549,7 @@
             <button type="button" id="previewSelectAllBtn" class="btn btn-secondary btn-sm">Select all</button>
             <button type="button" id="previewClearBtn" class="btn btn-secondary btn-sm">Clear selection</button>
           </div>
+          <div id="previewComplianceSummary" class="preview-compliance-summary" hidden></div>
           <div class="table-wrap table-wrap-modal">
             <table>
               <thead>
@@ -292,13 +561,20 @@
                   <th>Current</th>
                   <th></th>
                   <th>Proposed</th>
+                  <th>Compliance</th>
                   <th>Used on</th>
                 </tr>
               </thead>
               <tbody id="previewModalBody"></tbody>
             </table>
           </div>
-          <div id="previewModalMessage" class="message hidden" role="alert"></div>
+          <div id="previewModalMessage" class="message message-with-action hidden" role="alert">
+            <span class="message-text"></span>
+            <button type="button" id="previewModalViewErrorsBtn" class="btn btn-sm btn-secondary message-action-btn" hidden>
+              View errors
+            </button>
+          </div>
+          <ul id="previewModalErrorList" class="sync-error-list" hidden></ul>
           <div id="previewModalProgress" class="progress-wrap" hidden>
             <div id="previewModalProgressBar" class="progress-bar"></div>
           </div>
@@ -347,11 +623,13 @@
 
     <script src="js/theme.js"></script>
     <script src="js/utils.js"></script>
+    <script src="js/catalog-cache.js"></script>
     <script src="js/shopify-client.js"></script>
     <script src="js/file-usage-index.js"></script>
     <script src="js/rules-engine.js"></script>
     <script src="js/mutations.js"></script>
     <script src="js/catalog-quality.js"></script>
+    <script src="js/seo-audit.js"></script>
     <script src="js/detail-modal.js"></script>
     <script src="js/image-modal.js"></script>
     <script src="js/preview-modal.js"></script>
@@ -360,6 +638,9 @@
     <script src="js/shell.js"></script>
     <script src="js/local.js"></script>
     <script src="js/settings.js"></script>
+    <script src="js/image-room-map.js"></script>
     <script src="js/live.js"></script>
+    <script src="js/square-images.js"></script>
+    <script src="js/room-map.js"></script>
   </body>
 </html>

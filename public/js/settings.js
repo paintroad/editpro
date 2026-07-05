@@ -9,11 +9,22 @@
   const rulesMessage = document.getElementById("rulesMessage");
   const configPathHint = document.getElementById("configPathHint");
 
+  const descriptionPhrasesModal = document.getElementById("descriptionPhrasesModal");
+  const descriptionPhrasesModalClose = document.getElementById("descriptionPhrasesModalClose");
+  const descriptionPhrasesList = document.getElementById("descriptionPhrasesList");
+  const newDescriptionPhraseInput = document.getElementById("newDescriptionPhraseInput");
+  const addDescriptionPhraseBtn = document.getElementById("addDescriptionPhraseBtn");
+  const saveDescriptionPhrasesBtn = document.getElementById("saveDescriptionPhrasesBtn");
+  const cancelDescriptionPhrasesBtn = document.getElementById("cancelDescriptionPhrasesBtn");
+  const descriptionPhrasesMessage = document.getElementById("descriptionPhrasesMessage");
+
   const ruleFields = {
-    product: ["imageFilename", "imageAlt", "seoTitle", "seoDescription", "tags"],
+    product: ["imageFilename", "imageAlt", "seoTitle", "seoDescription", "tags", "newTags"],
     collection: ["imageFilename", "imageAlt", "seoTitle", "seoDescription"],
-    article: ["imageFilename", "imageAlt", "seoTitle", "seoDescription", "tags"],
+    article: ["imageFilename", "imageAlt", "seoTitle", "seoDescription", "tags", "newTags"],
   };
+
+  let draftDescriptionPhrases = [];
 
   function readRulesFromForm() {
     const rules = { product: {}, collection: {}, article: {} };
@@ -26,6 +37,22 @@
       }
     }
     return rules;
+  }
+
+  function getDescriptionPhrases() {
+    return window.EditProSettings?.descriptionPhrases || [];
+  }
+
+  function buildSettingsPayload(overrides = {}) {
+    return {
+      shopify: {
+        storeDomain: storeDomainInput.value.trim(),
+        accessToken: overrides.accessToken ?? "",
+      },
+      rules: readRulesFromForm(),
+      descriptionPhrases: overrides.descriptionPhrases ?? getDescriptionPhrases(),
+      roomDetection: overrides.roomDetection ?? window.EditProSettings?.roomDetection,
+    };
   }
 
   function fillRulesForm(rules) {
@@ -50,10 +77,100 @@
     fillRulesForm(data.rules);
     window.EditProSettings = {
       rules: data.rules,
+      descriptionPhrases: Array.isArray(data.descriptionPhrases) ? data.descriptionPhrases : [],
+      roomDetection: data.roomDetection || {
+        ollamaHost: "http://localhost:11434",
+        ollamaModel: "gemma3:4b",
+      },
       shopName: data.shopName || "",
       storeDomain: data.shopify.storeDomain || "",
       connected: Boolean(data.shopify.hasToken && data.shopify.storeDomain),
     };
+  }
+
+  function renderDescriptionPhrasesList() {
+    if (!descriptionPhrasesList) {
+      return;
+    }
+    if (!draftDescriptionPhrases.length) {
+      descriptionPhrasesList.innerHTML = '<p class="meta phrases-empty">No phrases yet. Add one above.</p>';
+      return;
+    }
+    descriptionPhrasesList.innerHTML = draftDescriptionPhrases
+      .map(
+        (phrase, index) => `
+          <div class="phrases-list-item" role="listitem">
+            <span class="phrases-list-index">${index + 1}.</span>
+            <span class="phrases-list-text">${EditProUtils.escapeHtml(phrase)}</span>
+            <button type="button" class="phrases-delete-btn" data-phrase-index="${index}" aria-label="Delete phrase">&times;</button>
+          </div>`
+      )
+      .join("");
+  }
+
+  function openDescriptionPhrasesModal() {
+    draftDescriptionPhrases = [...getDescriptionPhrases()];
+    renderDescriptionPhrasesList();
+    EditProUtils.hideMessage(descriptionPhrasesMessage);
+    if (newDescriptionPhraseInput) {
+      newDescriptionPhraseInput.value = "";
+    }
+    descriptionPhrasesModal.hidden = false;
+  }
+
+  function closeDescriptionPhrasesModal() {
+    descriptionPhrasesModal.hidden = true;
+    draftDescriptionPhrases = [];
+    EditProUtils.hideMessage(descriptionPhrasesMessage);
+  }
+
+  function addDescriptionPhrase() {
+    const phrase = newDescriptionPhraseInput?.value.trim();
+    if (!phrase) {
+      return;
+    }
+    const exists = draftDescriptionPhrases.some(
+      (item) => item.toLowerCase() === phrase.toLowerCase()
+    );
+    if (exists) {
+      EditProUtils.showMessage(descriptionPhrasesMessage, "That phrase is already in the list.", "warning");
+      return;
+    }
+    draftDescriptionPhrases.push(phrase);
+    if (newDescriptionPhraseInput) {
+      newDescriptionPhraseInput.value = "";
+    }
+    EditProUtils.hideMessage(descriptionPhrasesMessage);
+    renderDescriptionPhrasesList();
+  }
+
+  function deleteDescriptionPhrase(index) {
+    if (index < 0 || index >= draftDescriptionPhrases.length) {
+      return;
+    }
+    draftDescriptionPhrases.splice(index, 1);
+    renderDescriptionPhrasesList();
+  }
+
+  async function saveDescriptionPhrases() {
+    EditProUtils.hideMessage(descriptionPhrasesMessage);
+    saveDescriptionPhrasesBtn.disabled = true;
+    saveDescriptionPhrasesBtn.textContent = "Saving…";
+
+    try {
+      const data = await EditProUtils.apiPost("/api/settings", {
+        ...buildSettingsPayload({ descriptionPhrases: draftDescriptionPhrases }),
+      });
+      applySettings(data);
+      document.dispatchEvent(new CustomEvent("editpro:settings-saved"));
+      EditProUtils.showMessage(descriptionPhrasesMessage, "Phrases saved.", "success");
+      setTimeout(closeDescriptionPhrasesModal, 400);
+    } catch (error) {
+      EditProUtils.showMessage(descriptionPhrasesMessage, error.message, "error");
+    } finally {
+      saveDescriptionPhrasesBtn.disabled = false;
+      saveDescriptionPhrasesBtn.textContent = "Save phrases";
+    }
   }
 
   async function loadSettings() {
@@ -73,11 +190,7 @@
 
     try {
       const data = await EditProUtils.apiPost("/api/settings", {
-        shopify: {
-          storeDomain: storeDomainInput.value.trim(),
-          accessToken: accessTokenInput.value.trim(),
-        },
-        rules: readRulesFromForm(),
+        ...buildSettingsPayload({ accessToken: accessTokenInput.value.trim() }),
       });
       accessTokenInput.value = "";
       applySettings(data);
@@ -97,13 +210,7 @@
     saveRulesBtn.textContent = "Saving…";
 
     try {
-      const data = await EditProUtils.apiPost("/api/settings", {
-        shopify: {
-          storeDomain: storeDomainInput.value.trim(),
-          accessToken: "",
-        },
-        rules: readRulesFromForm(),
-      });
+      const data = await EditProUtils.apiPost("/api/settings", buildSettingsPayload());
       applySettings(data);
       document.dispatchEvent(new CustomEvent("editpro:settings-saved"));
       EditProUtils.showMessage(rulesMessage, "Rules saved.", "success");
@@ -123,11 +230,7 @@
     try {
       if (accessTokenInput.value.trim() || storeDomainInput.value.trim()) {
         await EditProUtils.apiPost("/api/settings", {
-          shopify: {
-            storeDomain: storeDomainInput.value.trim(),
-            accessToken: accessTokenInput.value.trim(),
-          },
-          rules: readRulesFromForm(),
+          ...buildSettingsPayload({ accessToken: accessTokenInput.value.trim() }),
         });
       }
       const result = await EditProShopify.testConnection();
@@ -165,5 +268,28 @@
   saveConnectionBtn?.addEventListener("click", saveConnection);
   saveRulesBtn?.addEventListener("click", saveRules);
   testConnectionBtn?.addEventListener("click", testConnection);
+
+  document.querySelectorAll(".manage-phrases-btn").forEach((btn) => {
+    btn.addEventListener("click", openDescriptionPhrasesModal);
+  });
+  descriptionPhrasesModalClose?.addEventListener("click", closeDescriptionPhrasesModal);
+  cancelDescriptionPhrasesBtn?.addEventListener("click", closeDescriptionPhrasesModal);
+  descriptionPhrasesModal?.querySelector(".modal-backdrop")?.addEventListener("click", closeDescriptionPhrasesModal);
+  addDescriptionPhraseBtn?.addEventListener("click", addDescriptionPhrase);
+  saveDescriptionPhrasesBtn?.addEventListener("click", saveDescriptionPhrases);
+  newDescriptionPhraseInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      addDescriptionPhrase();
+    }
+  });
+  descriptionPhrasesList?.addEventListener("click", (event) => {
+    const btn = event.target.closest(".phrases-delete-btn");
+    if (!btn) {
+      return;
+    }
+    deleteDescriptionPhrase(Number(btn.dataset.phraseIndex));
+  });
+
   loadSettings();
 })();

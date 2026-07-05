@@ -62,7 +62,15 @@ window.EditProUtils = {
     if (!el) {
       return;
     }
-    el.textContent = text;
+    const textEl = el.querySelector(".message-text");
+    if (textEl) {
+      textEl.textContent = text;
+    } else {
+      el.textContent = text;
+    }
+    el.querySelectorAll(".message-action-btn").forEach((btn) => {
+      btn.hidden = true;
+    });
     el.classList.remove("error", "success", "warning", "hidden");
     el.classList.add(type);
   },
@@ -71,7 +79,15 @@ window.EditProUtils = {
     if (!el) {
       return;
     }
-    el.textContent = "";
+    const textEl = el.querySelector(".message-text");
+    if (textEl) {
+      textEl.textContent = "";
+    } else {
+      el.textContent = "";
+    }
+    el.querySelectorAll(".message-action-btn").forEach((btn) => {
+      btn.hidden = true;
+    });
     el.classList.remove("error", "success", "warning");
     el.classList.add("hidden");
   },
@@ -80,6 +96,34 @@ window.EditProUtils = {
     const tmp = document.createElement("div");
     tmp.innerHTML = html || "";
     return (tmp.textContent || tmp.innerText || "").trim();
+  },
+
+  wordCount(text) {
+    const value = this.stripHtml(text);
+    if (!value) {
+      return 0;
+    }
+    return value.split(/\s+/).filter(Boolean).length;
+  },
+
+  hasParagraphStructure(html) {
+    const raw = String(html || "");
+    if (!raw.trim()) {
+      return false;
+    }
+
+    const tmp = document.createElement("div");
+    tmp.innerHTML = raw;
+    const paragraphs = [...tmp.querySelectorAll("p")].filter(
+      (p) => (p.textContent || "").trim().length > 0
+    );
+    if (paragraphs.length >= 2) {
+      return true;
+    }
+
+    const plain = this.stripHtml(raw);
+    const blocks = plain.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
+    return blocks.length >= 2;
   },
 
   truncate(text, max = 160) {

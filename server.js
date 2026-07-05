@@ -6,6 +6,7 @@ const {
   saveConfig,
   getPublicSettings,
   getShopifyCredentials,
+  loadConfig,
 } = require("./lib/config-store");
 const {
   loadSyncLog,
@@ -14,6 +15,20 @@ const {
   updateSyncLogEntry,
 } = require("./lib/sync-log-store");
 const { shopifyGraphql, testConnection } = require("./lib/shopify-client");
+const { fetchCatalog, fetchCatalogCounts } = require("./lib/catalog-fetcher");
+const {
+  loadResults: loadSquareImageResults,
+  runScan: runSquareImageScan,
+  getExcelPath,
+  excelExists,
+} = require("./lib/square-paintings-store");
+const { enumerateCatalogImages } = require("./lib/catalog-images");
+const {
+  loadImageRoomMap,
+  upsertMapping,
+} = require("./lib/image-room-store");
+const { detectRoomFromImageUrl } = require("./lib/room-detector");
+const { checkStatus, startOllama, stopOllama } = require("./lib/ollama-service");
 
 const app = express();
 const PORT = process.env.PORT || 3847;
@@ -21,7 +36,7 @@ const BASE_PATH = (process.env.BASE_PATH || "/editpro").replace(/\/$/, "");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const router = express.Router();
 
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "10mb" }));
 
 function listFilesInFolder(folderPath) {
   const entries = fs.readdirSync(folderPath, { withFileTypes: true });
@@ -199,6 +214,65 @@ router.post("/api/shopify/graphql", async (req, res) => {
   }
 });
 
+router.post("/api/shopify/catalog-counts", async (_req, res) => {
+  try {
+    const { storeDomain, accessToken } = getShopifyCredentials();
+    const counts = await fetchCatalogCounts(storeDomain, accessToken);
+    res.json(counts);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to fetch catalog counts." });
+  }
+});
+
+router.post("/api/shopify/catalog", async (req, res) => {
+  let aborted = false;
+  req.on("aborted", () => {
+    aborted = true;
+  });
+
+  res.setHeader("Content-Type", "application/x-ndjson");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("X-Accel-Buffering", "no");
+
+  try {
+    const { storeDomain, accessToken } = getShopifyCredentials();
+    const result = await fetchCatalog(storeDomain, accessToken, {
+      shouldAbort: () => aborted,
+      onProgress: (progress) => {
+        if (!aborted && !res.writableEnded) {
+          res.write(`${JSON.stringify({ event: "progress", ...progress })}\n`);
+        }
+      },
+      onPage: (page) => {
+        if (!aborted && !res.writableEnded) {
+          res.write(`${JSON.stringify({ event: "page", ...page })}\n`);
+        }
+      },
+    });
+
+    if (!aborted && !res.writableEnded) {
+      res.write(
+        `${JSON.stringify({
+          event: "done",
+          complete: result.complete !== false,
+          warning: result.warning || null,
+          counts: {
+            products: result.products.length,
+            collections: result.collections.length,
+            articles: result.articles.length,
+          },
+        })}\n`
+      );
+      res.end();
+    }
+  } catch (error) {
+    if (!aborted && !res.writableEnded) {
+      res.write(`${JSON.stringify({ event: "error", error: error.message || "Catalog fetch failed." })}\n`);
+      res.end();
+    }
+  }
+});
+
 router.get("/api/sync-log", (_req, res) => {
   try {
     res.json({ entries: loadSyncLog() });
@@ -299,6 +373,172 @@ router.post("/api/rename", (req, res) => {
     res.json({ ...result, files, plan });
   } catch (error) {
     res.status(400).json({ error: error.message || "Rename failed." });
+  }
+});
+
+router.get("/api/square-images", (_req, res) => {
+  try {
+    res.json(loadSquareImageResults());
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to load square image results." });
+  }
+});
+
+router.post("/api/square-images/scan", async (req, res) => {
+  try {
+    const { catalogPath } = req.body || {};
+    if (!catalogPath || typeof catalogPath !== "string") {
+      return res.status(400).json({ error: "Catalog path is required." });
+    }
+    const results = await runSquareImageScan(catalogPath);
+    res.json(results);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Square image scan failed." });
+  }
+});
+
+router.get("/api/square-images/download", (_req, res) => {
+  try {
+    if (!excelExists()) {
+      return res.status(404).json({ error: "No Excel file available. Run a scan first." });
+    }
+    res.download(getExcelPath(), "square-paintings.xlsx");
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to download Excel file." });
+  }
+});
+
+router.get("/api/image-room-map", (_req, res) => {
+  try {
+    const store = loadImageRoomMap();
+    res.json({
+      mappings: store.mappings,
+      updatedAt: store.updatedAt,
+      count: Object.keys(store.mappings).length,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to load image room map." });
+  }
+});
+
+router.post("/api/image-room-map/summary", (req, res) => {
+  try {
+    const storeData = req.body?.storeData || {};
+    const images = enumerateCatalogImages(storeData);
+    const mappings = loadImageRoomMap().mappings;
+    const rows = images.map((img) => ({
+      ...img,
+      room: mappings[img.fileId]?.room || "",
+      mapped: Boolean(mappings[img.fileId]),
+    }));
+    const mapped = rows.filter((r) => r.mapped).length;
+    const total = rows.length;
+    res.json({
+      total,
+      mapped,
+      unmapped: total - mapped,
+      complete: total > 0 && mapped === total,
+      rows,
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to summarize image room map." });
+  }
+});
+
+router.post("/api/image-room-map/scan", async (req, res) => {
+  let aborted = false;
+  req.on("aborted", () => {
+    aborted = true;
+  });
+
+  res.setHeader("Content-Type", "application/x-ndjson");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("X-Accel-Buffering", "no");
+
+  try {
+    const images = Array.isArray(req.body?.images) ? req.body.images : [];
+    const existing = loadImageRoomMap().mappings;
+    const toScan = images.filter((img) => img?.fileId && img?.url && !existing[img.fileId]);
+    const config = loadConfig();
+    const roomOptions = config.roomDetection || {};
+
+    let mapped = 0;
+    let skipped = images.length - toScan.length;
+
+    for (let i = 0; i < toScan.length; i++) {
+      if (aborted) {
+        break;
+      }
+      const img = toScan[i];
+      const room = await detectRoomFromImageUrl(img.url, roomOptions);
+      upsertMapping({
+        fileId: img.fileId,
+        resourceType: img.resourceType,
+        resourceId: img.resourceId,
+        resourceTitle: img.resourceTitle,
+        imageIndex: img.imageIndex,
+        url: img.url,
+        room,
+        source: "ollama",
+      });
+      mapped += 1;
+      if (!res.writableEnded) {
+        res.write(
+          `${JSON.stringify({
+            event: "progress",
+            current: i + 1,
+            total: toScan.length,
+            fileId: img.fileId,
+            room,
+          })}\n`
+        );
+      }
+    }
+
+    if (!aborted && !res.writableEnded) {
+      res.write(`${JSON.stringify({ event: "done", mapped, skipped })}\n`);
+      res.end();
+    }
+  } catch (error) {
+    if (!res.writableEnded) {
+      res.write(
+        `${JSON.stringify({ event: "error", error: error.message || "Room mapping failed." })}\n`
+      );
+      res.end();
+    }
+  }
+});
+
+router.get("/api/ollama/status", async (req, res) => {
+  try {
+    const config = loadConfig();
+    const host = req.query.host || config.roomDetection?.ollamaHost || "http://localhost:11434";
+    const status = await checkStatus(host);
+    res.json(status);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to check Ollama status." });
+  }
+});
+
+router.post("/api/ollama/start", async (req, res) => {
+  try {
+    const config = loadConfig();
+    const host = req.body?.host || config.roomDetection?.ollamaHost || "http://localhost:11434";
+    const result = await startOllama(host);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to start Ollama." });
+  }
+});
+
+router.post("/api/ollama/stop", async (req, res) => {
+  try {
+    const config = loadConfig();
+    const host = req.body?.host || config.roomDetection?.ollamaHost || "http://localhost:11434";
+    const result = await stopOllama(host);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to stop Ollama." });
   }
 });
 

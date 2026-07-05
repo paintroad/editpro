@@ -4,20 +4,26 @@ window.EditProPreviewModal = {
     this.body = document.getElementById("previewModalBody");
     this.titleEl = document.getElementById("previewModalTitle");
     this.countEl = document.getElementById("previewModalCount");
+    this.complianceSummaryEl = document.getElementById("previewComplianceSummary");
     this.actionBtn = document.getElementById("previewModalActionBtn");
     this.progressWrap = document.getElementById("previewModalProgress");
     this.progressBar = document.getElementById("previewModalProgressBar");
     this.messageEl = document.getElementById("previewModalMessage");
+    this.viewErrorsBtn = document.getElementById("previewModalViewErrorsBtn");
+    this.errorListEl = document.getElementById("previewModalErrorList");
 
     this.changes = [];
     this.selectedIds = new Set();
     this.mode = "sync";
     this.onComplete = null;
     this.logEntryId = null;
+    this.lastSyncErrors = [];
+    this.errorsExpanded = false;
 
     document.getElementById("previewModalClose")?.addEventListener("click", () => this.close());
     this.modal?.querySelector(".modal-backdrop")?.addEventListener("click", () => this.close());
     this.actionBtn?.addEventListener("click", () => this.runAction());
+    this.viewErrorsBtn?.addEventListener("click", () => this.toggleErrorList());
 
     document.getElementById("previewSelectAllBtn")?.addEventListener("click", () => {
       this.selectedIds = new Set(this.changes.map((c) => c.changeId));
@@ -40,7 +46,79 @@ window.EditProPreviewModal = {
       }
       this.updateActionButton();
       this.updateCount();
+      this.renderComplianceSummary();
     });
+  },
+
+  clearSyncErrors() {
+    this.lastSyncErrors = [];
+    this.errorsExpanded = false;
+    if (this.viewErrorsBtn) {
+      this.viewErrorsBtn.hidden = true;
+      this.viewErrorsBtn.textContent = "View errors";
+    }
+    if (this.errorListEl) {
+      this.errorListEl.hidden = true;
+      this.errorListEl.innerHTML = "";
+    }
+  },
+
+  renderErrorList() {
+    if (!this.errorListEl) {
+      return;
+    }
+    this.errorListEl.innerHTML = this.lastSyncErrors
+      .map((err) => {
+        const resource = EditProUtils.escapeHtml(err.resourceTitle || "Unknown");
+        const field = EditProUtils.escapeHtml(err.field || "Field");
+        const message = EditProUtils.escapeHtml(err.message || "Unknown error");
+        return `<li><strong>${resource}</strong> — ${field}: ${message}</li>`;
+      })
+      .join("");
+  },
+
+  showSyncErrors(errors) {
+    this.lastSyncErrors = errors;
+    this.errorsExpanded = false;
+    this.renderErrorList();
+    if (this.viewErrorsBtn) {
+      this.viewErrorsBtn.hidden = errors.length === 0;
+      this.viewErrorsBtn.textContent = "View errors";
+    }
+    if (this.errorListEl) {
+      this.errorListEl.hidden = true;
+    }
+  },
+
+  toggleErrorList() {
+    if (!this.lastSyncErrors.length) {
+      return;
+    }
+    this.errorsExpanded = !this.errorsExpanded;
+    if (this.errorListEl) {
+      this.errorListEl.hidden = !this.errorsExpanded;
+    }
+    if (this.viewErrorsBtn) {
+      this.viewErrorsBtn.textContent = this.errorsExpanded ? "Hide errors" : "View errors";
+    }
+  },
+
+  lookupResource(change) {
+    const storeData = window.EditProLive?.getStoreData?.() || {};
+    if (change.resourceType === "product") {
+      return storeData.products?.find((item) => item.id === change.resourceId) || null;
+    }
+    if (change.resourceType === "collection") {
+      return storeData.collections?.find((item) => item.id === change.resourceId) || null;
+    }
+    return storeData.articles?.find((item) => item.id === change.resourceId) || null;
+  },
+
+  annotateCompliance() {
+    for (const change of this.changes) {
+      const resource = this.lookupResource(change);
+      change.compliance = EditProCatalogQuality.evaluateProposedChange(change, resource);
+    }
   },
 
   open({ title, changes, mode = "sync", logEntryId = null, onComplete = null }) {
@@ -52,8 +130,10 @@ window.EditProPreviewModal = {
     this.onComplete = onComplete;
     this.changes = changes.map((c) => ({ ...c }));
     this.selectedIds = new Set(this.changes.map((c) => c.changeId));
+    this.annotateCompliance();
     this.titleEl.textContent = title;
     EditProUtils.hideMessage(this.messageEl);
+    this.clearSyncErrors();
     this.progressWrap.hidden = true;
     this.progressBar.style.width = "0%";
     this.render();
@@ -87,6 +167,22 @@ window.EditProPreviewModal = {
     return this.changes.filter((c) => this.selectedIds.has(c.changeId));
   },
 
+  renderComplianceCell(change) {
+    const compliance = change.compliance;
+    if (!compliance?.applicable) {
+      return `<td class="preview-compliance-cell"><span class="compliance-badge compliance-na">Not audited</span></td>`;
+    }
+    const status = compliance.status || (compliance.pass ? "pass" : "fail");
+    const badgeClass =
+      status === "pass" ? "compliance-pass" : status === "warn" ? "compliance-warn" : "compliance-fail";
+    const label =
+      status === "pass" ? "Compliant" : status === "warn" ? "Warning" : "Non-compliant";
+    const hint = compliance.hint
+      ? `<div class="preview-compliance-hint">${EditProUtils.escapeHtml(compliance.hint)}</div>`
+      : "";
+    return `<td class="preview-compliance-cell"><span class="compliance-badge ${badgeClass}">${label}</span>${hint}</td>`;
+  },
+
   renderRow(change) {
     const checked = this.selectedIds.has(change.changeId);
     const usage = change.fileUsage || [];
@@ -94,12 +190,23 @@ window.EditProPreviewModal = {
     const sharedBadge = EditProFileUsage.isShared(usage)
       ? ' <span class="badge badge-warning">Shared</span>'
       : "";
+    const compliance = change.compliance;
+    let rowClass = "preview-row--na";
+    if (compliance?.applicable) {
+      const status = compliance.status || (compliance.pass ? "pass" : "fail");
+      rowClass =
+        status === "pass"
+          ? "preview-row--pass"
+          : status === "warn"
+            ? "preview-row--warn"
+            : "preview-row--fail";
+    }
     const checkCell =
       this.mode === "view"
         ? ""
         : `<td class="col-check"><input type="checkbox" data-preview-change-id="${EditProUtils.escapeHtml(change.changeId)}" ${checked ? "checked" : ""} /></td>`;
 
-    return `<tr>
+    return `<tr class="${rowClass}">
       ${checkCell}
       <td>${EditProUtils.escapeHtml(change.resourceType)}</td>
       <td>${EditProUtils.escapeHtml(change.resourceTitle)}</td>
@@ -107,12 +214,75 @@ window.EditProPreviewModal = {
       <td class="preview-old">${EditProUtils.escapeHtml(change.displayCurrent ?? change.current ?? change.oldValue ?? "—")}</td>
       <td class="arrow">→</td>
       <td class="preview-new">${EditProUtils.escapeHtml(change.displayProposed ?? change.proposed ?? change.newValue ?? "—")}</td>
+      ${this.renderComplianceCell(change)}
       <td>${EditProUtils.escapeHtml(usageHtml)}${sharedBadge}</td>
     </tr>`;
   },
 
+  renderComplianceSummary() {
+    if (!this.complianceSummaryEl) {
+      return;
+    }
+
+    const selected = this.getSelectedChanges();
+    const applicable = selected.filter((change) => change.compliance?.applicable);
+
+    if (!applicable.length) {
+      this.complianceSummaryEl.hidden = true;
+      this.complianceSummaryEl.innerHTML = "";
+      return;
+    }
+
+    const passCount = applicable.filter((change) => change.compliance.status === "pass").length;
+    const warnCount = applicable.filter((change) => change.compliance.status === "warn").length;
+    const failCount = applicable.filter((change) => change.compliance.status === "fail").length;
+    const groups = new Map();
+
+    for (const change of applicable) {
+      const label = change.compliance.ruleLabel;
+      if (!groups.has(label)) {
+        groups.set(label, { pass: 0, warn: 0, fail: 0 });
+      }
+      const group = groups.get(label);
+      const status = change.compliance.status;
+      if (status === "pass") {
+        group.pass += 1;
+      } else if (status === "warn") {
+        group.warn += 1;
+      } else {
+        group.fail += 1;
+      }
+    }
+
+    const chips = [...groups.entries()]
+      .map(([label, counts]) => {
+        const parts = [];
+        if (counts.fail) {
+          parts.push(`${counts.fail} non-compliant`);
+        }
+        if (counts.warn) {
+          parts.push(`${counts.warn} warning${counts.warn === 1 ? "" : "s"}`);
+        }
+        if (counts.pass) {
+          parts.push(`${counts.pass} compliant`);
+        }
+        const chipClass = counts.fail
+          ? "preview-summary-chip preview-summary-chip--warn"
+          : counts.warn
+            ? "preview-summary-chip preview-summary-chip--amber"
+            : "preview-summary-chip preview-summary-chip--ok";
+        return `<span class="${chipClass}">${EditProUtils.escapeHtml(label)}: ${parts.join(", ")}</span>`;
+      })
+      .join("");
+
+    const compliantTotal = passCount + warnCount;
+    const warnSuffix = warnCount ? ` (${warnCount} with warnings)` : "";
+    this.complianceSummaryEl.innerHTML = `<p class="preview-summary-total">${compliantTotal} of ${applicable.length} selected edit${applicable.length === 1 ? "" : "s"} will be compliant${warnSuffix}${failCount ? ` · ${failCount} non-compliant` : ""}</p><div class="preview-summary-chips">${chips}</div>`;
+    this.complianceSummaryEl.hidden = false;
+  },
+
   render() {
-    const colSpan = this.mode === "view" ? 7 : 8;
+    const colSpan = this.mode === "view" ? 8 : 9;
     if (this.changes.length === 0) {
       this.body.innerHTML = `<tr class="empty-row"><td colspan="${colSpan}">No changes to preview.</td></tr>`;
     } else {
@@ -120,6 +290,7 @@ window.EditProPreviewModal = {
     }
     this.updateCount();
     this.updateActionButton();
+    this.renderComplianceSummary();
     const toolbar = document.getElementById("previewModalToolbar");
     if (toolbar) {
       toolbar.hidden = this.mode === "view";
@@ -172,28 +343,27 @@ window.EditProPreviewModal = {
     }
 
     EditProUtils.hideMessage(this.messageEl);
+    this.clearSyncErrors();
     this.actionBtn.disabled = true;
     this.progressWrap.hidden = false;
+    this.progressBar.style.width = "0%";
 
     const merged = EditProMutations.mergeFileUpdates(selected);
-    let done = 0;
-    let failed = 0;
+    const { errors, succeeded } = await EditProMutations.runChanges(merged, {
+      onProgress: (done, total) => {
+        this.progressBar.style.width = `${Math.round((done / total) * 100)}%`;
+      },
+    });
 
-    for (const change of merged) {
-      try {
-        await EditProMutations.runMutation(change);
-      } catch (error) {
-        failed += 1;
-        console.error(`${verb} failed:`, error);
-      }
-      done += 1;
-      this.progressBar.style.width = `${Math.round((done / merged.length) * 100)}%`;
-      await EditProUtils.sleep(500);
+    for (const err of errors) {
+      console.error(`${verb} failed:`, err);
     }
 
     this.progressWrap.hidden = true;
     this.progressBar.style.width = "0%";
     this.actionBtn.disabled = false;
+
+    const failed = errors.length;
 
     if (failed) {
       EditProUtils.showMessage(
@@ -201,6 +371,15 @@ window.EditProPreviewModal = {
         `${verb.charAt(0).toUpperCase() + verb.slice(1)} finished with ${failed} error${failed === 1 ? "" : "s"}. Re-fetch store to verify.`,
         "warning"
       );
+      this.showSyncErrors(errors);
+      if (succeeded.length && typeof this.onComplete === "function") {
+        await this.onComplete({
+          failed,
+          succeeded,
+          count: selected.length,
+          mode: this.mode,
+        });
+      }
     } else {
       EditProUtils.showMessage(
         this.messageEl,
@@ -217,10 +396,15 @@ window.EditProPreviewModal = {
       }
 
       if (typeof this.onComplete === "function") {
-        await this.onComplete({ failed, count: selected.length, mode: this.mode });
+        await this.onComplete({
+          failed: 0,
+          succeeded,
+          count: selected.length,
+          mode: this.mode,
+        });
       }
 
-      setTimeout(() => this.close(), failed ? 0 : 800);
+      setTimeout(() => this.close(), 800);
     }
   },
 };

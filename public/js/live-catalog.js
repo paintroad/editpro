@@ -31,6 +31,8 @@ window.EditProLiveCatalog = {
     this.selectedProductIds = new Set();
     this.selectedCollectionIds = new Set();
     this.selectedArticleIds = new Set();
+    this.showSelectAllBar = false;
+    this.filterSelectAllActive = false;
 
     this.bindEvents();
     this.render();
@@ -43,6 +45,7 @@ window.EditProLiveCatalog = {
         document.querySelectorAll("[data-live-tab]").forEach((b) => {
           b.classList.toggle("active", b.dataset.liveTab === this.activeTab);
         });
+        this.resetSelectAllBarState();
         this.render();
         document.dispatchEvent(new CustomEvent("editpro:catalog-updated"));
       });
@@ -72,6 +75,10 @@ window.EditProLiveCatalog = {
     document.getElementById("catalogNextBtn")?.addEventListener("click", () => {
       this.page[this.activeTab] += 1;
       this.renderList();
+    });
+
+    document.getElementById("catalogSelectAllFilterBtn")?.addEventListener("click", () => {
+      this.selectAllForFilter();
     });
 
     document.getElementById("catalogList")?.addEventListener("change", (e) => {
@@ -149,6 +156,7 @@ window.EditProLiveCatalog = {
     }
     this.filters[this.activeTab][key] = el.value;
     this.page[this.activeTab] = 1;
+    this.resetSelectAllBarState();
     this.renderList();
   },
 
@@ -160,8 +168,38 @@ window.EditProLiveCatalog = {
       set.add(issue);
     }
     this.page[this.activeTab] = 1;
+    this.resetSelectAllBarState();
     this.renderFilterBar();
     this.renderList();
+  },
+
+  applyRuleFilter(tab, ruleKey) {
+    const validTabs = ["products", "collections", "articles"];
+    if (!validTabs.includes(tab)) {
+      return;
+    }
+
+    this.activeTab = tab;
+    document.querySelectorAll("[data-live-tab]").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.liveTab === tab);
+    });
+
+    for (const tabId of validTabs) {
+      this.filters[tabId].qualityIssues = new Set();
+    }
+    if (ruleKey) {
+      this.filters[tab].qualityIssues.add(ruleKey);
+    }
+    this.page[tab] = 1;
+    this.resetSelectAllBarState();
+    this.render();
+    document.dispatchEvent(new CustomEvent("editpro:catalog-updated"));
+  },
+
+  renderScoreBadge(type, item) {
+    const score = EditProCatalogQuality.scoreResource(type, item);
+    const scoreClass = EditProCatalogQuality.scoreBadgeClass(score);
+    return `<span class="score-badge ${scoreClass}">${score}</span>`;
   },
 
   setStoreData(storeData, fileUsageIndex) {
@@ -196,8 +234,39 @@ window.EditProLiveCatalog = {
 
   clearSelection() {
     this.resetSelection();
+    this.resetSelectAllBarState();
     this.renderList();
     document.dispatchEvent(new CustomEvent("editpro:catalog-updated"));
+  },
+
+  resetSelectAllBarState() {
+    this.showSelectAllBar = false;
+    this.filterSelectAllActive = false;
+  },
+
+  getActiveTabSelectionSet() {
+    if (this.activeTab === "products") {
+      return this.selectedProductIds;
+    }
+    if (this.activeTab === "collections") {
+      return this.selectedCollectionIds;
+    }
+    return this.selectedArticleIds;
+  },
+
+  clearActiveTabSelection() {
+    this.getActiveTabSelectionSet().clear();
+    this.resetSelectAllBarState();
+  },
+
+  isItemSelected(type, id) {
+    if (type === "product") {
+      return this.selectedProductIds.has(id);
+    }
+    if (type === "collection") {
+      return this.selectedCollectionIds.has(id);
+    }
+    return this.selectedArticleIds.has(id);
   },
 
   getSelection() {
@@ -226,14 +295,46 @@ window.EditProLiveCatalog = {
       map[type]?.add(id);
     } else {
       map[type]?.delete(id);
+      if (this.filterSelectAllActive) {
+        this.filterSelectAllActive = false;
+        this.showSelectAllBar = false;
+      }
     }
   },
 
+  selectAllForFilter() {
+    const items = this.getFilteredItems();
+    const set = this.getActiveTabSelectionSet();
+    for (const item of items) {
+      set.add(item.id);
+    }
+    this.filterSelectAllActive = true;
+    this.showSelectAllBar = true;
+    this.renderList();
+    document.dispatchEvent(new CustomEvent("editpro:catalog-updated"));
+  },
+
   selectVisible(checked) {
+    if (!checked) {
+      this.clearActiveTabSelection();
+      this.renderList();
+      document.dispatchEvent(new CustomEvent("editpro:catalog-updated"));
+      return;
+    }
+
     const { items } = this.getVisiblePage();
     for (const item of items) {
-      this.toggleSelection(item._resourceType, item.id, checked);
+      this.toggleSelection(item._resourceType, item.id, true);
     }
+
+    const filteredItems = this.getFilteredItems();
+    if (filteredItems.length > items.length) {
+      this.showSelectAllBar = true;
+      this.filterSelectAllActive = false;
+    } else {
+      this.resetSelectAllBarState();
+    }
+
     this.renderList();
     document.dispatchEvent(new CustomEvent("editpro:catalog-updated"));
   },
@@ -394,14 +495,14 @@ window.EditProLiveCatalog = {
     return EditProUtils.sortByKey(items, (a) => a.title, direction);
   },
 
-  getVisiblePage() {
+  getFilteredItems(tab = this.activeTab) {
     let items = [];
-    if (this.activeTab === "products") {
+    if (tab === "products") {
       items = this.sortItems(this.filterProducts(), "products").map((p) => ({
         ...p,
         _resourceType: "product",
       }));
-    } else if (this.activeTab === "collections") {
+    } else if (tab === "collections") {
       items = this.sortItems(this.filterCollections(), "collections").map((c) => ({
         ...c,
         _resourceType: "collection",
@@ -412,7 +513,11 @@ window.EditProLiveCatalog = {
         _resourceType: "article",
       }));
     }
+    return items;
+  },
 
+  getVisiblePage() {
+    const items = this.getFilteredItems();
     const total = items.length;
     const totalPages = Math.max(1, Math.ceil(total / this.PAGE_SIZE));
     const page = Math.min(this.page[this.activeTab], totalPages);
@@ -453,21 +558,75 @@ window.EditProLiveCatalog = {
       return;
     }
 
+    const filteredItems = this.getFilteredItems();
+    const set = this.getActiveTabSelectionSet();
+    const allFilteredSelected =
+      filteredItems.length > 0 && filteredItems.every((item) => set.has(item.id));
+
     let selectedCount = 0;
     for (const item of items) {
-      const selected =
-        item._resourceType === "product"
-          ? this.selectedProductIds.has(item.id)
-          : item._resourceType === "collection"
-            ? this.selectedCollectionIds.has(item.id)
-            : this.selectedArticleIds.has(item.id);
-      if (selected) {
+      if (this.isItemSelected(item._resourceType, item.id)) {
         selectedCount += 1;
       }
     }
 
+    if (this.filterSelectAllActive && allFilteredSelected) {
+      cb.checked = true;
+      cb.indeterminate = false;
+      return;
+    }
+
     cb.checked = selectedCount === items.length;
     cb.indeterminate = selectedCount > 0 && selectedCount < items.length;
+  },
+
+  renderSelectAllBar() {
+    const bar = document.getElementById("catalogSelectAllBar");
+    const text = document.getElementById("catalogSelectAllBarText");
+    const btn = document.getElementById("catalogSelectAllFilterBtn");
+    if (!bar || !text || !btn) {
+      return;
+    }
+
+    const filteredItems = this.getFilteredItems();
+    const filteredTotal = filteredItems.length;
+    const { items: visibleItems } = this.getVisiblePage();
+
+    if (filteredTotal === 0) {
+      bar.hidden = true;
+      return;
+    }
+
+    if (this.filterSelectAllActive) {
+      const set = this.getActiveTabSelectionSet();
+      const allSelected = filteredItems.every((item) => set.has(item.id));
+      if (allSelected) {
+        bar.hidden = false;
+        text.textContent = `All ${filteredTotal} items for this filter are selected.`;
+        btn.hidden = true;
+        return;
+      }
+      this.filterSelectAllActive = false;
+    }
+
+    if (!this.showSelectAllBar || filteredTotal <= visibleItems.length) {
+      bar.hidden = true;
+      return;
+    }
+
+    const allVisibleSelected = visibleItems.every((item) =>
+      this.isItemSelected(item._resourceType, item.id)
+    );
+    if (!allVisibleSelected) {
+      bar.hidden = true;
+      this.showSelectAllBar = false;
+      return;
+    }
+
+    bar.hidden = false;
+    btn.hidden = false;
+    text.textContent = `All ${visibleItems.length} items on this page are selected.`;
+    btn.textContent = `Select all ${filteredTotal} items for this filter`;
   },
 
   renderListHeader() {
@@ -476,6 +635,7 @@ window.EditProLiveCatalog = {
         <th class="col-check"><label class="catalog-item-check"><input type="checkbox" id="selectAllVisibleCheckbox" aria-label="Select all visible" /></label></th>
         <th class="col-image">Image</th>
         <th class="col-title">Product Name</th>
+        <th class="col-score">Score</th>
         <th class="col-images">Images</th>
         <th class="col-seo-title">SEO title</th>
         <th class="col-seo">SEO description</th>
@@ -487,6 +647,7 @@ window.EditProLiveCatalog = {
         <th class="col-check"><label class="catalog-item-check"><input type="checkbox" id="selectAllVisibleCheckbox" aria-label="Select all visible" /></label></th>
         <th class="col-image">Image</th>
         <th class="col-title">Collection Name</th>
+        <th class="col-score">Score</th>
         <th class="col-images">Images</th>
         <th class="col-seo-title">SEO title</th>
         <th class="col-seo">SEO description</th>
@@ -497,6 +658,7 @@ window.EditProLiveCatalog = {
       <th class="col-check"><label class="catalog-item-check"><input type="checkbox" id="selectAllVisibleCheckbox" aria-label="Select all visible" /></label></th>
       <th class="col-image">Image</th>
       <th class="col-title">Blog Title</th>
+      <th class="col-score">Score</th>
       <th class="col-images">Images</th>
       <th class="col-seo-title">SEO title</th>
       <th class="col-seo">SEO description</th>
@@ -538,6 +700,7 @@ window.EditProLiveCatalog = {
       </td>
       <td class="col-image">${this.renderThumb(type, item)}</td>
       <td class="col-title">${EditProUtils.escapeHtml(item.title)}</td>
+      <td class="col-score">${this.renderScoreBadge(type, item)}</td>
       <td class="col-images">${imageCount}</td>
       <td class="col-seo-title">${EditProUtils.truncateCell(seoTitle, 40)}</td>
       <td class="col-seo">${EditProUtils.truncateCell(seoDesc, 80)}</td>
@@ -562,6 +725,7 @@ window.EditProLiveCatalog = {
       list.innerHTML =
         '<div class="catalog-empty">Fetch your store to browse products, collections, and blog articles.</div>';
       this.updatePagination(0, 1, 1);
+      this.renderSelectAllBar();
       return;
     }
 
@@ -578,6 +742,7 @@ window.EditProLiveCatalog = {
 
     this.updatePagination(total, page, totalPages);
     this.updateSelectAllCheckbox();
+    this.renderSelectAllBar();
   },
 
   render() {
