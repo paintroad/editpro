@@ -402,6 +402,29 @@ def _select_opening_component(
     return _select_central_component(placeholder_mask, canvas_size)
 
 
+def _is_flat_template_mat(mask: np.ndarray, canvas_size: int) -> bool:
+    """Null-style frames: large rectangular grey mat with white border strips."""
+    area = cv2.countNonZero(mask)
+    canvas_area = canvas_size * canvas_size
+    if area < canvas_area * 0.42:
+        return False
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return False
+
+    contour = max(contours, key=cv2.contourArea)
+    rect = cv2.minAreaRect(contour)
+    w, h = rect[1]
+    if min(w, h) < canvas_size * 0.35:
+        return False
+
+    rect_area = float(w * h)
+    if rect_area <= 0:
+        return False
+    return cv2.contourArea(contour) / rect_area > 0.88
+
+
 def _inset_filled_mask(filled_mask: np.ndarray, inset_px: int = PLACEHOLDER_MAT_INSET_PX) -> np.ndarray:
     if inset_px <= 0:
         return filled_mask
@@ -419,13 +442,16 @@ def _filled_placeholder_mask(
 ) -> np.ndarray:
     """Solid opening mask: best placeholder component, gap-filled, contour-filled, mat-inset."""
     component = _select_opening_component(placeholder_mask, canvas_size, use_green_mat)
+    flat_template = _is_flat_template_mat(component, canvas_size)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (31, 31))
     closed = cv2.morphologyEx(component, cv2.MORPH_CLOSE, kernel, iterations=2)
     contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
-        return _inset_filled_mask(closed)
+        return _inset_filled_mask(closed) if not flat_template else closed
     filled = np.zeros_like(placeholder_mask)
     cv2.drawContours(filled, [max(contours, key=cv2.contourArea)], -1, 255, thickness=cv2.FILLED)
+    if flat_template:
+        return filled
     return _inset_filled_mask(filled)
 
 
@@ -565,14 +591,23 @@ def detect_grey_mat_quad_from_frame_border(
     return best_quad
 
 
-def _quad_from_filled_mask(filled_mask: np.ndarray, canvas_size: int) -> np.ndarray:
+def _quad_from_filled_mask(
+    filled_mask: np.ndarray, canvas_size: int, flat_template: bool = False
+) -> np.ndarray:
     """Perspective quad from the solid opening contour (4-corner fit, not axis-aligned bbox)."""
-    fit_mask = _quad_fit_mask(filled_mask)
+    fit_mask = filled_mask if flat_template else _quad_fit_mask(filled_mask)
     contours, _ = cv2.findContours(fit_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return fallback_rect(canvas_size)
 
     contour = max(contours, key=cv2.contourArea)
+
+    if flat_template:
+        rect = cv2.minAreaRect(contour)
+        quad = order_points(cv2.boxPoints(rect).astype(np.float32))
+        if _is_valid_quad(quad, canvas_size):
+            return quad
+
     peri = cv2.arcLength(contour, True)
     best_quad: Optional[np.ndarray] = None
     best_iou = -1.0
@@ -621,6 +656,7 @@ def detect_placeholder_quad(
     if use_green_mat is None:
         use_green_mat = _resolve_green_mat_mode(frame, green_mask, canvas_size)
     filled_mask = _filled_placeholder_mask(mask, canvas_size, use_green_mat=use_green_mat)
+    flat_template = _is_flat_template_mat(filled_mask, canvas_size)
     filled_area = cv2.countNonZero(filled_mask)
     canvas_area = canvas_size * canvas_size
     if filled_area < canvas_area * 0.008:
@@ -628,7 +664,7 @@ def detect_placeholder_quad(
     if filled_area > canvas_area * PLACEHOLDER_MAX_AREA_RATIO:
         return detect_opening_quad(frame, canvas_size)
 
-    quad = _quad_from_filled_mask(filled_mask, canvas_size)
+    quad = _quad_from_filled_mask(filled_mask, canvas_size, flat_template=flat_template)
     iou = _quad_placeholder_iou(quad, filled_mask, canvas_size)
 
     if not use_green_mat and iou < 0.75:
@@ -819,8 +855,11 @@ def composite_painting_into_frame(
     )
     warped, geom_mask = fit_painting_to_quad(painting_crop, quad)
     quad_mask = _mask_from_quad(quad, canvas_size)
+    flat_template = _is_flat_template_mat(solid_mask, canvas_size)
     overlap = cv2.bitwise_and(solid_mask, quad_mask)
-    if cv2.countNonZero(overlap) < cv2.countNonZero(quad_mask) * 0.5:
+    if flat_template:
+        solid_mask = quad_mask
+    elif cv2.countNonZero(overlap) < cv2.countNonZero(quad_mask) * 0.5:
         solid_mask = _inset_filled_mask(quad_mask)
     else:
         solid_mask = cv2.bitwise_and(solid_mask, quad_mask)
