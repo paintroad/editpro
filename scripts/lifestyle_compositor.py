@@ -34,31 +34,6 @@ _PLACEHOLDER_GREEN_BGR = np.array(
 )
 _PLACEHOLDER_GREY_LAB = cv2.cvtColor(_PLACEHOLDER_GREY_BGR, cv2.COLOR_BGR2LAB)[0, 0].astype(np.float32)
 _PLACEHOLDER_GREEN_LAB = cv2.cvtColor(_PLACEHOLDER_GREEN_BGR, cv2.COLOR_BGR2LAB)[0, 0].astype(np.float32)
-_DEBUG_LOG_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "debug-b9cb80.log"
-)
-
-
-def _debug_log(hypothesis_id: str, location: str, message: str, data: dict, run_id: str = "pre-fix") -> None:
-    if os.getenv("EDITPRO_COMPOSITOR_DEBUG") != "1":
-        return
-    try:
-        import json
-        import time
-
-        payload = {
-            "sessionId": "b9cb80",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-            "runId": run_id,
-        }
-        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload) + "\n")
-    except OSError:
-        pass
 
 
 def luminance(r: float, g: float, b: float) -> float:
@@ -255,25 +230,6 @@ def detect_placeholder_mask(frame_bgr: np.ndarray, canvas_size: int = CANVAS_SIZ
     if use_flatness:
         mask = _apply_flatness_filter(frame, mask)
 
-    # #region agent log
-    _debug_log(
-        "A",
-        "detect_placeholder_mask",
-        "color_pick",
-        {
-            "greenArea": green_area,
-            "greyArea": grey_area,
-            "largestGreen": largest_green,
-            "hasGreenMat": has_green_mat,
-            "centerColor": center_color,
-            "picked": picked,
-            "flatness": use_flatness,
-            "finalArea": int(cv2.countNonZero(mask)),
-        },
-        run_id=os.getenv("EDITPRO_COMPOSITOR_RUN_ID", "green-cal"),
-    )
-    # #endregion
-
     return mask
 
 
@@ -382,11 +338,67 @@ def _select_largest_rectangular_component(placeholder_mask: np.ndarray, canvas_s
     return (labels == best_label).astype(np.uint8) * 255
 
 
+def _select_scored_grey_component(placeholder_mask: np.ndarray, canvas_size: int) -> np.ndarray:
+    """Pick the painting opening on grey frames; reject wall-spanning grey blobs."""
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
+        placeholder_mask, connectivity=8
+    )
+    if num_labels <= 1:
+        return np.zeros_like(placeholder_mask)
+
+    canvas_area = canvas_size * canvas_size
+    best_label = 0
+    best_score = -1.0
+
+    for label in range(1, num_labels):
+        area = int(stats[label, cv2.CC_STAT_AREA])
+        if area < canvas_area * 0.02 or area > canvas_area * 0.22:
+            continue
+
+        x = int(stats[label, cv2.CC_STAT_LEFT])
+        y = int(stats[label, cv2.CC_STAT_TOP])
+        w = int(stats[label, cv2.CC_STAT_WIDTH])
+        h = int(stats[label, cv2.CC_STAT_HEIGHT])
+        if w > canvas_size * 0.52 or h > canvas_size * 0.65:
+            continue
+
+        touches_left = x <= 2
+        touches_right = x + w >= canvas_size - 2
+        touches_top = y <= 2
+        touches_bottom = y + h >= canvas_size - 2
+        if touches_left and touches_right:
+            continue
+        if (touches_left and touches_top and touches_right) or (
+            touches_left and touches_bottom and touches_right
+        ):
+            continue
+
+        cx, cy = centroids[label]
+        aspect = min(w, h) / max(w, h) if max(w, h) > 0 else 0.0
+        rectangularity = _component_rectangularity(labels, stats, label)
+        aspect_score = 1.0 - min(abs(aspect - 0.72) / 0.35, 1.0)
+        center_score = 1.0 - (cy / canvas_size) * 0.25 - abs(cx / canvas_size - 0.5) * 0.3
+        rect_score = min(rectangularity, 1.0)
+        size_score = 1.0 - min(abs(area / (canvas_area * 0.10) - 1.0), 1.0)
+        score = aspect_score * 0.25 + center_score * 0.15 + rect_score * 0.25 + size_score * 0.35
+        if score > best_score:
+            best_score = score
+            best_label = label
+
+    if best_label <= 0:
+        return np.zeros_like(placeholder_mask)
+    return (labels == best_label).astype(np.uint8) * 255
+
+
 def _select_opening_component(
     placeholder_mask: np.ndarray, canvas_size: int, use_green_mat: bool = False
 ) -> np.ndarray:
     if use_green_mat:
         return _select_largest_rectangular_component(placeholder_mask, canvas_size)
+
+    scored = _select_scored_grey_component(placeholder_mask, canvas_size)
+    if cv2.countNonZero(scored) > 0:
+        return scored
     return _select_central_component(placeholder_mask, canvas_size)
 
 
@@ -440,7 +452,9 @@ def _quad_dimensions(quad: np.ndarray) -> Tuple[float, float]:
     return max(width_a, width_b), max(height_a, height_b)
 
 
-def _is_valid_quad(quad: np.ndarray, canvas_size: int) -> bool:
+def _is_valid_quad(
+    quad: np.ndarray, canvas_size: int, min_area_ratio: float = PLACEHOLDER_MIN_AREA_RATIO
+) -> bool:
     max_w, max_h = _quad_dimensions(quad)
     if max_w < 8 or max_h < 8:
         return False
@@ -449,7 +463,7 @@ def _is_valid_quad(quad: np.ndarray, canvas_size: int) -> bool:
         return False
     area = cv2.contourArea(quad.reshape(-1, 1, 2).astype(np.float32))
     canvas_area = canvas_size * canvas_size
-    if area < canvas_area * PLACEHOLDER_MIN_AREA_RATIO:
+    if area < canvas_area * min_area_ratio:
         return False
     if area > canvas_area * PLACEHOLDER_MAX_AREA_RATIO:
         return False
@@ -469,9 +483,92 @@ def _quad_from_contour(contour: np.ndarray, canvas_size: int) -> np.ndarray:
     return order_points(box.astype(np.float32))
 
 
+def _quad_fit_mask(filled_mask: np.ndarray) -> np.ndarray:
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
+    for iterations in (2, 1):
+        eroded = cv2.erode(filled_mask, kernel, iterations=iterations)
+        if cv2.countNonZero(eroded) >= cv2.countNonZero(filled_mask) * 0.5:
+            return eroded
+    return filled_mask
+
+
+def detect_grey_mat_quad_from_frame_border(
+    frame_bgr: np.ndarray, canvas_size: int = CANVAS_SIZE
+) -> Optional[np.ndarray]:
+    """Find grey mat opening via dark picture-frame contour; inset for mat interior."""
+    frame = _ensure_canvas(frame_bgr, canvas_size)
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    dark = (gray < DARK_THRESHOLD).astype(np.uint8) * 255
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    dark = cv2.morphologyEx(dark, cv2.MORPH_CLOSE, kernel, iterations=2)
+    grey_raw = _color_match_mask(
+        frame,
+        PLACEHOLDER_GREY_RGB,
+        _PLACEHOLDER_GREY_LAB,
+        PLACEHOLDER_RGB_TOLERANCE,
+        PLACEHOLDER_LAB_TOLERANCE,
+    )
+
+    contours, _ = cv2.findContours(dark, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+
+    canvas_area = canvas_size * canvas_size
+    best_quad: Optional[np.ndarray] = None
+    best_score = -1.0
+
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area < canvas_area * 0.0015 or area > canvas_area * 0.18:
+            continue
+
+        rect = cv2.minAreaRect(contour)
+        w, h = rect[1]
+        if min(w, h) < 24:
+            continue
+
+        aspect = min(w, h) / max(w, h) if max(w, h) > 0 else 0.0
+        if aspect < 0.35:
+            continue
+
+        box = order_points(cv2.boxPoints(rect).astype(np.float32))
+        center = box.mean(axis=0)
+        inset_ratio = 0.12
+        inner = order_points((center + (box - center) * (1.0 - inset_ratio * 2)).astype(np.float32))
+        if not _is_valid_quad(inner, canvas_size, min_area_ratio=0.015):
+            continue
+
+        inner_mask = _mask_from_quad(inner, canvas_size)
+        inner_area = cv2.countNonZero(inner_mask)
+        if inner_area < canvas_area * 0.01:
+            continue
+
+        grey_inside = cv2.countNonZero(cv2.bitwise_and(grey_raw, inner_mask))
+        grey_density = grey_inside / inner_area
+        if grey_density < 0.45:
+            continue
+
+        cx, cy = center
+        center_score = 1.0 - (cy / canvas_size) * 0.35 - abs(cx / canvas_size - 0.5) * 0.35
+        size_score = 1.0 - min(abs(area / (canvas_area * 0.05) - 1.0), 1.0)
+        aspect_score = 1.0 - min(abs(aspect - 0.72) / 0.4, 1.0)
+        score = (
+            grey_density * 0.45
+            + center_score * 0.2
+            + size_score * 0.2
+            + aspect_score * 0.15
+        )
+        if score > best_score:
+            best_score = score
+            best_quad = inner
+
+    return best_quad
+
+
 def _quad_from_filled_mask(filled_mask: np.ndarray, canvas_size: int) -> np.ndarray:
     """Perspective quad from the solid opening contour (4-corner fit, not axis-aligned bbox)."""
-    contours, _ = cv2.findContours(filled_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    fit_mask = _quad_fit_mask(filled_mask)
+    contours, _ = cv2.findContours(fit_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return fallback_rect(canvas_size)
 
@@ -479,14 +576,16 @@ def _quad_from_filled_mask(filled_mask: np.ndarray, canvas_size: int) -> np.ndar
     peri = cv2.arcLength(contour, True)
     best_quad: Optional[np.ndarray] = None
     best_iou = -1.0
-    for epsilon_ratio in (0.003, 0.005, 0.008, 0.01, 0.015, 0.02, 0.03, 0.05):
+    for epsilon_ratio in (
+        0.003, 0.005, 0.008, 0.01, 0.015, 0.02, 0.03, 0.05, 0.08, 0.12,
+    ):
         approx = cv2.approxPolyDP(contour, epsilon_ratio * peri, True)
         if len(approx) != 4:
             continue
         quad = order_points(approx.reshape(4, 2).astype(np.float32))
         if not _is_valid_quad(quad, canvas_size):
             continue
-        iou = _quad_placeholder_iou(quad, filled_mask, canvas_size)
+        iou = _quad_placeholder_iou(quad, fit_mask, canvas_size)
         if iou > best_iou:
             best_iou = iou
             best_quad = quad
@@ -531,6 +630,12 @@ def detect_placeholder_quad(
 
     quad = _quad_from_filled_mask(filled_mask, canvas_size)
     iou = _quad_placeholder_iou(quad, filled_mask, canvas_size)
+
+    if not use_green_mat and iou < 0.75:
+        frame_quad = detect_grey_mat_quad_from_frame_border(frame, canvas_size)
+        if frame_quad is not None:
+            return frame_quad
+
     if iou < 0.45:
         opening_quad = detect_opening_quad(frame, canvas_size)
         opening_iou = _quad_placeholder_iou(opening_quad, filled_mask, canvas_size)
@@ -659,31 +764,6 @@ def fit_painting_to_quad(painting_bgr: np.ndarray, quad: np.ndarray) -> Tuple[np
     crop_x = x0 if new_w > max_w else 0
     crop_y = y0 if new_h > max_h else 0
 
-    # #region agent log
-    _debug_log(
-        "B",
-        "fit_painting_to_quad",
-        "cover_fit",
-        {
-            "quadW": max_w,
-            "quadH": max_h,
-            "quadAr": round(quad_ar, 4),
-            "paintW": pw,
-            "paintH": ph,
-            "paintAr": round(paint_ar, 4),
-            "fitMode": fit_mode,
-            "scale": round(scale, 4),
-            "resizedW": new_w,
-            "resizedH": new_h,
-            "cropX": crop_x,
-            "cropY": crop_y,
-            "outW": int(cropped.shape[1]),
-            "outH": int(cropped.shape[0]),
-        },
-        run_id=os.getenv("EDITPRO_COMPOSITOR_RUN_ID", "pre-fix"),
-    )
-    # #endregion
-
     warped = _warp_rect_to_quad(cropped, quad, CANVAS_SIZE)
     white_rect = np.full_like(cropped, 255, dtype=np.uint8)
     geom_mask_color = _warp_rect_to_quad(white_rect, quad, CANVAS_SIZE)
@@ -738,20 +818,13 @@ def composite_painting_into_frame(
         use_green_mat=use_green_mat,
     )
     warped, geom_mask = fit_painting_to_quad(painting_crop, quad)
+    quad_mask = _mask_from_quad(quad, canvas_size)
+    overlap = cv2.bitwise_and(solid_mask, quad_mask)
+    if cv2.countNonZero(overlap) < cv2.countNonZero(quad_mask) * 0.5:
+        solid_mask = _inset_filled_mask(quad_mask)
+    else:
+        solid_mask = cv2.bitwise_and(solid_mask, quad_mask)
     region_mask = cv2.bitwise_and(geom_mask, solid_mask)
-
-    # #region agent log
-    _debug_log(
-        "B",
-        "composite_painting_into_frame",
-        "composite_frame",
-        {
-            "frame": os.path.basename(frame_path),
-            "quadIou": round(_quad_placeholder_iou(quad, solid_mask, canvas_size), 4),
-        },
-        run_id=os.getenv("EDITPRO_COMPOSITOR_RUN_ID", "pre-fix"),
-    )
-    # #endregion
 
     result = multiply_blend(frame_resized, warped, region_mask)
 

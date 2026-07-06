@@ -16,6 +16,8 @@ from lifestyle_compositor import (
     _color_match_mask,
     _ensure_canvas,
     _filled_placeholder_mask,
+    _inset_filled_mask,
+    _mask_from_quad,
     _morph_placeholder_mask,
     _quad_placeholder_iou,
     _resolve_green_mat_mode,
@@ -55,7 +57,7 @@ def collect_frames(root: str) -> list[str]:
             and not any(d.startswith(p) for p in skip_prefixes)
         ]
         for filename in sorted(filenames, key=lambda v: v.lower()):
-            if filename.startswith(".") or not is_image_file(filename):
+            if filename.startswith(".") or filename.startswith("._") or not is_image_file(filename):
                 continue
             paths.append(os.path.join(dirpath, filename))
     return paths
@@ -84,7 +86,13 @@ def analyze_frame(frame_path: str, output_dir: str) -> dict:
     )
     mask_area = int(cv2.countNonZero(mask))
     solid_area = int(cv2.countNonZero(solid))
-    quad_iou = float(_quad_placeholder_iou(quad, solid, CANVAS_SIZE))
+    quad_mask = _mask_from_quad(quad, CANVAS_SIZE)
+    overlap = cv2.bitwise_and(solid, quad_mask)
+    if cv2.countNonZero(overlap) < cv2.countNonZero(quad_mask) * 0.5:
+        region_mask = _inset_filled_mask(quad_mask)
+    else:
+        region_mask = cv2.bitwise_and(solid, quad_mask)
+    quad_iou = float(_quad_placeholder_iou(quad, region_mask, CANVAS_SIZE))
     min_area = int(CANVAS_SIZE * CANVAS_SIZE * PLACEHOLDER_MIN_AREA_RATIO)
     ok = mask_area >= min_area and quad_iou >= 0.75
 
@@ -176,7 +184,7 @@ def main() -> int:
                 for frame_path in sorted(
                     os.path.join(frame_dir, name)
                     for name in os.listdir(frame_dir)
-                    if is_image_file(name)
+                    if is_image_file(name) and not name.startswith("._")
                 ):
                     stem = os.path.splitext(os.path.basename(frame_path))[0].replace(" ", "_")
                     composite_painting_into_frame(
