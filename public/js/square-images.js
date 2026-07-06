@@ -1,6 +1,5 @@
 (function initSquareImagesModule() {
   const STORAGE_KEY = "editpro-square-catalog-path";
-  const DEFAULT_CATALOG_PATH = "C:\\Paintroad\\Catalog\\Optimised Catalog";
 
   const catalogPathInput = document.getElementById("squareCatalogPath");
   const catalogMeta = document.getElementById("squareCatalogMeta");
@@ -13,14 +12,19 @@
   const messageEl = document.getElementById("squareMessage");
   const scanOverlay = document.getElementById("squareScanOverlay");
 
-  let catalogPath = DEFAULT_CATALOG_PATH;
+  let catalogPath = EditProUtils.getDefaultCatalogPath();
   let scanning = false;
 
   function loadCatalogPath() {
     try {
-      catalogPath = localStorage.getItem(STORAGE_KEY) || DEFAULT_CATALOG_PATH;
+      let stored = localStorage.getItem(STORAGE_KEY);
+      if (EditProUtils.isLegacyCatalogPath(stored)) {
+        localStorage.removeItem(STORAGE_KEY);
+        stored = null;
+      }
+      catalogPath = stored || EditProUtils.getDefaultCatalogPath();
     } catch {
-      catalogPath = DEFAULT_CATALOG_PATH;
+      catalogPath = EditProUtils.getDefaultCatalogPath();
     }
     if (catalogPathInput) {
       catalogPathInput.value = catalogPath;
@@ -193,6 +197,15 @@
   document.addEventListener("editpro:module-changed", (event) => {
     if (event.detail?.moduleId === "square") {
       loadResults();
+    }
+  });
+  document.addEventListener("editpro:settings-loaded", () => {
+    if (!localStorage.getItem(STORAGE_KEY)) {
+      catalogPath = EditProUtils.getDefaultCatalogPath();
+      if (catalogPathInput) {
+        catalogPathInput.value = catalogPath;
+      }
+      updateCatalogMeta();
     }
   });
 

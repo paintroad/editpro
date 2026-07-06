@@ -7,6 +7,11 @@ window.EditProShopify = {
     return EditProUtils.apiPost("/api/shopify/test", {});
   },
 
+  async refreshShopName() {
+    const result = await this.testConnection();
+    return result.shop?.name || "";
+  },
+
   async fetchCatalogCounts() {
     return EditProUtils.apiPost("/api/shopify/catalog-counts", {});
   },

@@ -47,6 +47,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="1"/><rect x="7" y="7" width="10" height="10" rx="0.5"/></svg>
             <span class="rail-module-label">Square images</span>
           </button>
+          <button type="button" class="rail-module" data-module="catalog" title="Catalog" aria-label="Catalog">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7a2 2 0 012-2h3l2 2h7a2 2 0 012 2v9a2 2 0 01-2 2H6a2 2 0 01-2-2V7z"/><path stroke-linecap="round" d="M8 13h8M8 17h5"/></svg>
+            <span class="rail-module-label">Catalog</span>
+          </button>
           <button type="button" class="rail-module" data-module="roommap" title="Image Room Map" aria-label="Image Room Map">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 10.5V19a1 1 0 001 1h6v-6.5H3zm8 0V20h6a1 1 0 001-1v-8.5h-7zm8-1.5V19a1 1 0 01-1 1h-2V9H19a1 1 0 011 1v1z"/><path stroke-linecap="round" stroke-linejoin="round" d="M3 9.5L12 4l9 5.5"/></svg>
             <span class="rail-module-label">Image Room Map</span>
@@ -229,10 +233,10 @@
           <section class="card">
             <h2>1. Catalog folder</h2>
             <div class="folder-row">
-              <input type="text" id="squareCatalogPath" placeholder="Paste full path (e.g. C:\Paintroad\Catalog\Optimised Catalog)" />
+              <input type="text" id="squareCatalogPath" placeholder="Paste full path to your Optimised Catalog folder" />
               <button type="button" id="squareUsePathBtn" class="btn btn-secondary">Use path</button>
             </div>
-            <p id="squareCatalogMeta" class="meta">Default: C:\Paintroad\Catalog\Optimised Catalog</p>
+            <p id="squareCatalogMeta" class="meta">Default catalog path loads from EditPro settings.</p>
           </section>
 
           <section class="card">
@@ -267,70 +271,193 @@
           </section>
         </div>
 
-        <div id="module-roommap" class="module-panel" hidden>
-          <div id="roomMapScanOverlay" class="fetch-overlay" hidden aria-live="polite">
+        <div id="module-catalog" class="module-panel catalog-builder-module" hidden>
+          <div id="catalogEnrichOverlay" class="fetch-overlay" hidden aria-live="polite">
             <div class="fetch-overlay-panel">
-              <p class="fetch-overlay-title">Mapping rooms</p>
-              <p id="roomMapScanProgress" class="fetch-overlay-stats">Please wait…</p>
+              <p class="fetch-overlay-title" id="catalogJobOverlayTitle">Working…</p>
+              <p id="catalogEnrichOverlayStatus" class="fetch-overlay-stats">Please wait…</p>
             </div>
           </div>
 
-          <section class="card">
-            <div class="room-map-action-bar">
-              <div class="room-map-action-info">
-                <h2>Image room coverage</h2>
-                <p id="roomMapCoverage" class="meta">0 / 0 images mapped</p>
-                <span id="roomMapStatusBadge" class="badge room-map-status-badge room-map-status-badge--incomplete">Incomplete</span>
-              </div>
-              <div class="room-map-action-cluster">
-                <button type="button" id="roomMapScanBtn" class="btn btn-primary" disabled>Map unmapped images</button>
+          <div class="catalog-builder-action-bar">
+            <div class="catalog-builder-action-left">
+              <span class="catalog-builder-module-title">Catalog Builder</span>
+              <span id="catalogCountBadge" class="badge">0 products</span>
+              <p id="catalogStatsMeta" class="meta catalog-builder-stats">Import a folder to begin.</p>
+              <p id="catalogEnrichStatus" class="meta room-map-scan-status" hidden></p>
+              <p id="catalogOrientationStatus" class="meta room-map-scan-status" hidden></p>
+            </div>
+            <div class="catalog-builder-action-right">
+              <a id="catalogExportLink" class="btn btn-secondary btn-sm square-download-link disabled" href="#" hidden>Export CSV</a>
+              <button type="button" id="catalogLifestyleBtn" class="btn btn-secondary btn-sm" disabled>Generate lifestyle images</button>
+              <button type="button" id="catalogOrientationBtn" class="btn btn-secondary btn-sm" disabled>Re-detect orientation</button>
+              <button type="button" id="catalogEnrichBtn" class="btn btn-primary btn-sm" disabled>Generate with OpenAI</button>
+            </div>
+          </div>
+
+          <div id="catalogPythonAlert" class="message warning catalog-python-alert" hidden role="alert">
+            <span id="catalogPythonAlertText">Python: checking…</span>
+          </div>
+
+          <div id="catalogMessage" class="message seo-toast hidden" role="alert"></div>
+
+          <section class="card catalog-builder-path-card">
+            <div class="catalog-builder-paths-row">
+              <label class="catalog-path-field">
+                <span class="catalog-path-field-label">Paintings</span>
+                <input type="text" id="catalogPathInput" placeholder="Path to painting images" />
+              </label>
+              <label class="catalog-path-field">
+                <span class="catalog-path-field-label">Frames</span>
+                <input type="text" id="catalogFramePathInput" placeholder="Path to frame templates (Portrait, Landscape, Square subfolders)" />
+                <span id="catalogFramePathStatus" class="catalog-path-field-status meta hidden" aria-live="polite"></span>
+              </label>
+              <label class="catalog-path-field">
+                <span class="catalog-path-field-label">Export</span>
+                <input type="text" id="catalogLifestyleOutputInput" placeholder="Path to save lifestyle images" />
+              </label>
+              <div class="catalog-path-actions">
+                <button type="button" id="catalogImportBtn" class="btn btn-secondary">Import</button>
               </div>
             </div>
-            <div id="roomMapMessage" class="message hidden" role="alert"></div>
           </section>
 
-          <section class="card">
-            <h2>Ollama</h2>
-            <div class="room-map-ollama-status-row">
-              <div class="room-map-ollama-status-info">
-                <span id="roomMapOllamaStatusBadge" class="room-map-ollama-pill room-map-ollama-pill--checking">Checking…</span>
-                <p id="roomMapOllamaStatusText" class="meta room-map-ollama-status-text">Checking Ollama status…</p>
+          <section class="card catalog-builder-list-card">
+            <div class="catalog-builder-toolbar">
+              <div id="catalogBuilderSelectAllBar" class="catalog-select-all-bar" hidden>
+                <span id="catalogBuilderSelectAllText"></span>
+                <button type="button" id="catalogBuilderSelectAllBtn" class="btn btn-link btn-sm">Select all products</button>
               </div>
-              <div class="room-map-ollama-status-actions">
-                <button type="button" id="roomMapOllamaRefreshBtn" class="btn btn-secondary btn-sm">Refresh</button>
-                <button type="button" id="roomMapOllamaStartBtn" class="btn btn-secondary btn-sm">Start Ollama</button>
-                <button type="button" id="roomMapOllamaStopBtn" class="btn btn-secondary btn-sm">Stop Ollama</button>
+              <div class="catalog-builder-toolbar-main">
+                <div id="catalogBuilderFilters" class="catalog-builder-filters">
+                  <label class="catalog-filter-field">
+                    <span class="catalog-filter-label">Orientation</span>
+                    <div id="catalogFilterOrientation" class="ms-dropdown"></div>
+                  </label>
+                  <label class="catalog-filter-field">
+                    <span class="catalog-filter-label">Shape</span>
+                    <div id="catalogFilterShape" class="ms-dropdown"></div>
+                  </label>
+                  <label class="catalog-filter-field">
+                    <span class="catalog-filter-label">Status</span>
+                    <div id="catalogFilterStatus" class="ms-dropdown"></div>
+                  </label>
+                  <label class="catalog-filter-field">
+                    <span class="catalog-filter-label">Lifestyle</span>
+                    <div id="catalogFilterLifestyle" class="ms-dropdown"></div>
+                  </label>
+                </div>
+                <div id="catalogBuilderPagination" class="catalog-pagination" hidden>
+                  <button type="button" id="catalogBuilderPrevBtn" class="catalog-page-btn">Prev</button>
+                  <span id="catalogBuilderPageInfo" class="catalog-page-info"></span>
+                  <button type="button" id="catalogBuilderNextBtn" class="catalog-page-btn">Next</button>
+                </div>
               </div>
             </div>
-            <p class="meta">Requires Ollama running locally with a vision model (e.g. <code>ollama pull gemma3:4b</code>).</p>
-            <div class="settings-grid room-map-ollama-grid">
-              <label class="field field-wide">
-                <span>Ollama host</span>
-                <input type="text" id="roomMapOllamaHost" placeholder="http://localhost:11434" />
-              </label>
-              <label class="field field-wide">
-                <span>Vision model</span>
-                <input type="text" id="roomMapOllamaModel" placeholder="gemma3:4b" />
-              </label>
+            <div id="catalogBuilderTableWrap" class="table-wrap catalog-builder-table-wrap table-wrap-full">
+              <table class="catalog-builder-table">
+                <thead>
+                  <tr>
+                    <th class="col-check">
+                      <label class="catalog-item-check">
+                        <input type="checkbox" id="catalogSelectAllVisibleCheckbox" aria-label="Select all visible" />
+                      </label>
+                    </th>
+                    <th>Image</th>
+                    <th>ID</th>
+                    <th>Title</th>
+                    <th>Shape</th>
+                    <th>Orientation</th>
+                    <th>Tags</th>
+                    <th>Alt (100)</th>
+                    <th>Lifestyle</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="catalogTableBody">
+                  <tr class="empty-row">
+                    <td colspan="10">Import a catalog folder to list products.</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
-            <button type="button" id="roomMapSaveOllamaBtn" class="btn btn-secondary btn-sm">Save Ollama settings</button>
           </section>
 
-          <section class="card">
-            <div class="room-map-table-toolbar">
-              <input type="search" id="roomMapSearch" class="filter-search" placeholder="Search by product name…" />
-              <label class="room-map-toggle">
-                <input type="checkbox" id="roomMapUnmappedOnly" />
-                Show unmapped only
+          <div id="catalogDetailModal" class="modal" hidden>
+            <div class="modal-backdrop" data-catalog-detail-close></div>
+            <div class="modal-panel modal-panel-wide">
+              <div class="modal-header">
+                <h2 id="catalogDetailTitle">Product</h2>
+                <button type="button" class="btn btn-ghost btn-sm" data-catalog-detail-close aria-label="Close">×</button>
+              </div>
+              <div id="catalogDetailBody" class="modal-body"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="module-roommap" class="module-panel roommap-module" hidden>
+          <div class="room-map-action-bar">
+            <div class="room-map-action-left">
+              <span class="room-map-module-title">Image room coverage</span>
+              <span id="roomMapStatusBadge" class="badge room-map-status-badge room-map-status-badge--incomplete">Incomplete</span>
+              <p id="roomMapScanStatus" class="meta room-map-scan-status" hidden></p>
+            </div>
+            <div class="room-map-action-right">
+              <span id="roomMapCoverage" class="room-map-coverage-stat">0 / 0 mapped</span>
+              <button type="button" id="roomMapScanBtn" class="btn btn-primary btn-sm" disabled>Map unmapped images</button>
+            </div>
+          </div>
+          <div id="roomMapMessage" class="message seo-toast hidden" role="alert"></div>
+
+          <section class="card room-map-openai-card">
+            <div class="room-map-openai-header">
+              <h2>OpenAI</h2>
+              <div class="room-map-openai-status-info">
+                <span id="roomMapOpenAiStatusBadge" class="room-map-openai-pill room-map-openai-pill--checking">Checking…</span>
+                <span id="roomMapOpenAiStatusText" class="meta room-map-openai-status-text">Checking API key…</span>
+              </div>
+            </div>
+            <p class="meta room-map-openai-help">Uses OpenAI vision to detect rooms in lifestyle mockup images. Portraits are auto-mapped and skipped.</p>
+            <div class="room-map-openai-fields-row">
+              <label class="field">
+                <span>Model</span>
+                <input type="text" id="roomMapOpenAiModel" placeholder="gpt-4o" />
               </label>
-              <select id="roomMapSort">
-                <option value="title-asc">Title A–Z</option>
-                <option value="room-asc">Room A–Z</option>
-                <option value="unmapped-first">Unmapped first</option>
-              </select>
+              <label class="field">
+                <span>API key</span>
+                <input type="password" id="roomMapOpenAiKey" placeholder="sk-… (optional if OPENAI_API_KEY is set)" autocomplete="off" />
+              </label>
+              <label class="field field-narrow">
+                <span>Parallel</span>
+                <input type="number" id="roomMapOpenAiConcurrency" min="1" max="32" step="1" placeholder="8" />
+              </label>
+              <button type="button" id="roomMapSaveOpenAiBtn" class="btn btn-secondary btn-sm">Save</button>
+            </div>
+          </section>
+
+          <section class="card room-map-list-card">
+            <div class="room-map-filter-bar seo-filter-bar">
+              <div class="filter-scroll-bar room-map-filter-scroll">
+                <input type="search" id="roomMapSearch" class="filter-search room-map-search" placeholder="Search by product name…" />
+                <button type="button" class="filter-chip active" data-map-filter="all">All</button>
+                <button type="button" class="filter-chip" data-map-filter="mapped">Mapped</button>
+                <button type="button" class="filter-chip" data-map-filter="unmapped">Unmapped</button>
+                <select id="roomMapSort">
+                  <option value="title-asc">Title A–Z</option>
+                  <option value="room-asc">Room A–Z</option>
+                  <option value="unmapped-first">Unmapped first</option>
+                </select>
+              </div>
+              <div class="filter-actions">
+                <div id="roomMapPagination" class="catalog-pagination" hidden>
+                  <button type="button" id="roomMapPrevBtn" class="catalog-page-btn">Prev</button>
+                  <span id="roomMapPageInfo" class="catalog-page-info"></span>
+                  <button type="button" id="roomMapNextBtn" class="catalog-page-btn">Next</button>
+                </div>
+              </div>
             </div>
             <p id="roomMapEmpty" class="catalog-empty" hidden></p>
-            <div id="roomMapTableWrap" class="table-wrap room-map-table-wrap">
+            <div id="roomMapTableWrap" class="table-wrap room-map-table-wrap table-wrap-full">
               <table class="room-map-table">
                 <thead>
                   <tr>
@@ -374,6 +501,33 @@
         <div class="modal-footer">
           <button type="button" id="cancelDescriptionPhrasesBtn" class="btn btn-secondary">Cancel</button>
           <button type="button" id="saveDescriptionPhrasesBtn" class="btn btn-primary">Save phrases</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="roomFallbacksModal" class="modal" hidden>
+      <div class="modal-backdrop"></div>
+      <div class="modal-panel modal-panel-wide" role="dialog" aria-labelledby="roomFallbacksModalTitle">
+        <div class="modal-header">
+          <h2 id="roomFallbacksModalTitle">Room filename fallbacks</h2>
+          <button type="button" id="roomFallbacksModalClose" class="modal-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="meta">
+            Used when <code>{{room}}</code> is in the image filename template and the image has no room or is set to
+            <strong>none</strong> (portraits). Also tried in order when the proposed filename is already used by another
+            file in your store or another image in the same sync. Keep at least <strong>20</strong> unique options.
+          </p>
+          <div class="phrases-add-row">
+            <input type="text" id="newRoomFallbackInput" placeholder="living-space" />
+            <button type="button" id="addRoomFallbackBtn" class="btn btn-secondary">Add option</button>
+          </div>
+          <div id="roomFallbacksList" class="phrases-list" role="list"></div>
+          <div id="roomFallbacksMessage" class="message hidden" role="alert"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="cancelRoomFallbacksBtn" class="btn btn-secondary">Cancel</button>
+          <button type="button" id="saveRoomFallbacksBtn" class="btn btn-primary">Save fallbacks</button>
         </div>
       </div>
     </div>
@@ -429,8 +583,11 @@
 
           <div id="rulesPanelProduct" class="rules-panel">
             <p class="meta cheat-sheet cheat-sheet-row">
-              <span>Tokens: {{handle}} {{product_name}} {{product_type}} {{product_vendor}} {{shop_name}} {{tag1}} {{tag2}} {{tag3}} {{random_tag}} {{room}} {{incrementing_number}} {{title}} {{description}} {{description160}} {{random_description}} {{image.index}}</span>
-              <button type="button" class="btn btn-secondary btn-sm manage-phrases-btn">Manage phrases</button>
+              <span>Tokens: {{handle}} {{product_name}} {{product_type}} {{product_vendor}} {{shop_name}} {{tag1}} {{tag2}} {{tag3}} {{random_tag}} {{room}} {{incrementing_number}} {{title}} {{description}} {{description100}} {{description160}} {{random_description}} {{image.index}}</span>
+              <span class="cheat-sheet-actions">
+                <button type="button" class="btn btn-secondary btn-sm manage-room-fallbacks-btn">Room fallbacks</button>
+                <button type="button" class="btn btn-secondary btn-sm manage-phrases-btn">Manage phrases</button>
+              </span>
             </p>
             <div class="settings-grid">
               <label class="field field-wide">
@@ -464,8 +621,11 @@
 
           <div id="rulesPanelCollection" class="rules-panel" hidden>
             <p class="meta cheat-sheet cheat-sheet-row">
-              <span>Tokens: {{handle}} {{collection_name}} {{title}} {{shop_name}} {{description}} {{description160}} {{room}} {{random_description}} {{incrementing_number}} {{image.index}}</span>
-              <button type="button" class="btn btn-secondary btn-sm manage-phrases-btn">Manage phrases</button>
+              <span>Tokens: {{handle}} {{collection_name}} {{title}} {{shop_name}} {{description}} {{description100}} {{description160}} {{room}} {{random_description}} {{incrementing_number}} {{image.index}}</span>
+              <span class="cheat-sheet-actions">
+                <button type="button" class="btn btn-secondary btn-sm manage-room-fallbacks-btn">Room fallbacks</button>
+                <button type="button" class="btn btn-secondary btn-sm manage-phrases-btn">Manage phrases</button>
+              </span>
             </p>
             <div class="settings-grid">
               <label class="field field-wide">
@@ -493,8 +653,11 @@
 
           <div id="rulesPanelArticle" class="rules-panel" hidden>
             <p class="meta cheat-sheet cheat-sheet-row">
-              <span>Tokens: {{handle}} {{blog_name}} {{blog_title}} {{title}} {{shop_name}} {{tag1}} {{tag2}} {{tag3}} {{random_tag}} {{room}} {{description}} {{description160}} {{random_description}} {{incrementing_number}} {{image.index}}</span>
-              <button type="button" class="btn btn-secondary btn-sm manage-phrases-btn">Manage phrases</button>
+              <span>Tokens: {{handle}} {{blog_name}} {{blog_title}} {{title}} {{shop_name}} {{tag1}} {{tag2}} {{tag3}} {{random_tag}} {{room}} {{description}} {{description100}} {{description160}} {{random_description}} {{incrementing_number}} {{image.index}}</span>
+              <span class="cheat-sheet-actions">
+                <button type="button" class="btn btn-secondary btn-sm manage-room-fallbacks-btn">Room fallbacks</button>
+                <button type="button" class="btn btn-secondary btn-sm manage-phrases-btn">Manage phrases</button>
+              </span>
             </p>
             <div class="settings-grid">
               <label class="field field-wide">
@@ -537,18 +700,19 @@
     <div id="previewModal" class="modal" hidden>
       <div class="modal-backdrop"></div>
       <div class="modal-panel modal-panel-wide" role="dialog" aria-labelledby="previewModalTitle">
-        <div class="modal-header">
-          <div>
+        <div class="modal-header preview-modal-header">
+          <div class="preview-modal-header__title">
             <h2 id="previewModalTitle">Preview changes</h2>
             <span id="previewModalCount" class="badge">0 selected</span>
           </div>
-          <button type="button" id="previewModalClose" class="modal-close" aria-label="Close">&times;</button>
-        </div>
-        <div class="modal-body modal-body-table">
-          <div id="previewModalToolbar" class="catalog-toolbar">
+          <div class="preview-modal-header__actions">
             <button type="button" id="previewSelectAllBtn" class="btn btn-secondary btn-sm">Select all</button>
             <button type="button" id="previewClearBtn" class="btn btn-secondary btn-sm">Clear selection</button>
+            <button type="button" id="previewModalClose" class="modal-close" aria-label="Close">&times;</button>
           </div>
+        </div>
+        <div class="modal-body modal-body-table">
+          <div id="previewFieldFilters" class="preview-field-filters" hidden></div>
           <div id="previewComplianceSummary" class="preview-compliance-summary" hidden></div>
           <div class="table-wrap table-wrap-modal">
             <table>
@@ -568,15 +732,17 @@
               <tbody id="previewModalBody"></tbody>
             </table>
           </div>
-          <div id="previewModalMessage" class="message message-with-action hidden" role="alert">
-            <span class="message-text"></span>
-            <button type="button" id="previewModalViewErrorsBtn" class="btn btn-sm btn-secondary message-action-btn" hidden>
-              View errors
-            </button>
-          </div>
-          <ul id="previewModalErrorList" class="sync-error-list" hidden></ul>
-          <div id="previewModalProgress" class="progress-wrap" hidden>
-            <div id="previewModalProgressBar" class="progress-bar"></div>
+          <div class="preview-modal-status">
+            <div id="previewModalMessage" class="message message-with-action hidden" role="alert">
+              <span class="message-text"></span>
+              <button type="button" id="previewModalViewErrorsBtn" class="btn btn-sm btn-secondary message-action-btn" hidden>
+                View errors
+              </button>
+            </div>
+            <ul id="previewModalErrorList" class="sync-error-list" hidden></ul>
+            <div id="previewModalProgress" class="progress-wrap" hidden>
+              <div id="previewModalProgressBar" class="progress-bar"></div>
+            </div>
           </div>
         </div>
         <div class="modal-footer">
@@ -641,6 +807,8 @@
     <script src="js/image-room-map.js"></script>
     <script src="js/live.js"></script>
     <script src="js/square-images.js"></script>
+    <script src="js/multiselect-dropdown.js"></script>
+    <script src="js/catalog.js"></script>
     <script src="js/room-map.js"></script>
   </body>
 </html>

@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "map-rooms": "node scripts/map-image-rooms.js"
+    "map-rooms": "node scripts/map-image-rooms.js",
+    "scan-square": "node scripts/scan-square-paintings.js"
   },
   "engines": {
     "node": ">=18"

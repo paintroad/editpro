@@ -4,7 +4,7 @@ window.EditProCatalogQuality = {
     altText: "Alt text",
     title: "Title",
     descriptionLength: "Description",
-    descriptionParagraphs: "Description paragraphs",
+    descriptionParagraphs: "Description formatting",
     seoTitle: "SEO title",
     seoDescription: "SEO description",
   },
@@ -27,7 +27,6 @@ window.EditProCatalogQuality = {
     title: 15,
     altText: 15,
     seoDescription: 12,
-    descriptionParagraphs: 10,
     filename: 10,
   },
 
@@ -161,24 +160,6 @@ window.EditProCatalogQuality = {
     };
   },
 
-  getRulesForType(resourceType) {
-    const rules = window.EditProSettings?.rules;
-    if (!rules) {
-      return null;
-    }
-    if (resourceType === "product") {
-      return rules.product;
-    }
-    if (resourceType === "collection") {
-      return rules.collection;
-    }
-    return rules.article;
-  },
-
-  getShopName() {
-    return window.EditProSettings?.shopName || "";
-  },
-
   getImageFilename(img) {
     return EditProUtils.filenameFromUrl(img?.image?.url || img?.url || "");
   },
@@ -188,55 +169,19 @@ window.EditProCatalogQuality = {
     return base.includes("_");
   },
 
-  expectedFilename(resourceType, resource, image, imageIndex, rules, shopName, randomContext) {
-    if (!rules?.imageFilename) {
-      return null;
-    }
-    if (EditProRules.templateHasRandomTokens(rules.imageFilename) && !randomContext) {
-      return null;
-    }
-    const currentFilename = this.getImageFilename(image);
-    let ctx;
-    if (resourceType === "product") {
-      ctx = EditProRules.productContext(resource, shopName, image, imageIndex);
-    } else if (resourceType === "collection") {
-      ctx = EditProRules.collectionContext(resource, shopName);
-    } else {
-      ctx = EditProRules.articleContext(resource, shopName);
-    }
-    if (randomContext) {
-      ctx = EditProRules.mergeContext(ctx, randomContext);
-    }
-    return EditProRules.sanitizeFilename(
-      EditProRules.applyTemplate(rules.imageFilename, ctx),
-      currentFilename
-    );
-  },
-
-  evaluateFilenameImage(resourceType, resource, image, imageIndex) {
-    const actual = this.getImageFilename(image);
+  evaluateFilenameValue(filename) {
+    const actual = String(filename || "").trim();
     if (!actual) {
       return { status: "fail", hint: "Missing filename" };
     }
     if (this.filenameHasUnderscores(actual)) {
       return { status: "fail", hint: "Use hyphens instead of underscores" };
     }
-    const rules = this.getRulesForType(resourceType);
-    const expected = this.expectedFilename(
-      resourceType,
-      resource,
-      image,
-      imageIndex,
-      rules,
-      this.getShopName()
-    );
-    if (expected && actual.toLowerCase() !== expected.toLowerCase()) {
-      return {
-        status: "fail",
-        hint: `Does not match expected pattern (expected "${expected}")`,
-      };
-    }
     return { status: "pass", hint: null };
+  },
+
+  evaluateFilenameImage(resourceType, resource, image, imageIndex) {
+    return this.evaluateFilenameValue(this.getImageFilename(image));
   },
 
   filenamePasses(resourceType, resource, image, imageIndex) {
@@ -527,65 +472,6 @@ window.EditProCatalogQuality = {
     return null;
   },
 
-  findImageForChange(change, resource) {
-    const resourceType = change.resourceType;
-    if (change.fileInput?.id) {
-      if (resourceType === "product") {
-        const images = this.productImages(resource);
-        const index = images.findIndex((img) => img.id === change.fileInput.id);
-        if (index >= 0) {
-          return { image: images[index], imageIndex: index + 1 };
-        }
-      } else if (resource.image?.id === change.fileInput.id) {
-        return { image: resource.image, imageIndex: 1 };
-      }
-    }
-
-    const match = String(change.field || "").match(/Image (\d+)/i);
-    if (match && resourceType === "product") {
-      const index = parseInt(match[1], 10) - 1;
-      const images = this.productImages(resource);
-      if (images[index]) {
-        return { image: images[index], imageIndex: index + 1 };
-      }
-    }
-
-    if (resourceType !== "product" && resource.image) {
-      return { image: resource.image, imageIndex: 1 };
-    }
-
-    return null;
-  },
-
-  imageWithProposedFilename(image, proposedFilename) {
-    const url = image?.image?.url || image?.url || "";
-    if (!url) {
-      return {
-        ...image,
-        image: { ...(image?.image || {}), url: proposedFilename },
-        url: proposedFilename,
-      };
-    }
-    try {
-      const parsed = new URL(url);
-      const parts = parsed.pathname.split("/");
-      parts[parts.length - 1] = proposedFilename;
-      parsed.pathname = parts.join("/");
-      const nextUrl = parsed.toString();
-      return {
-        ...image,
-        image: { ...(image?.image || {}), url: nextUrl },
-        url: nextUrl,
-      };
-    } catch {
-      return {
-        ...image,
-        image: { ...(image?.image || {}), url: proposedFilename },
-        url: proposedFilename,
-      };
-    }
-  },
-
   evaluateProposedValue(ruleKey, proposed, resourceType, resource, imageInfo) {
     if (ruleKey === "seoTitle") {
       return this.evaluateSeoTitle(proposed);
@@ -597,16 +483,7 @@ window.EditProCatalogQuality = {
       return this.evaluateAltText(proposed);
     }
     if (ruleKey === "filename") {
-      if (!imageInfo || !proposed) {
-        return { status: "fail", hint: "Missing image or filename" };
-      }
-      const imageClone = this.imageWithProposedFilename(imageInfo.image, proposed);
-      return this.evaluateFilenameImage(
-        resourceType,
-        resource,
-        imageClone,
-        imageInfo.imageIndex
-      );
+      return this.evaluateFilenameValue(proposed);
     }
     return { status: "pass", hint: null };
   },
@@ -625,16 +502,12 @@ window.EditProCatalogQuality = {
     }
 
     const proposed = change.proposed ?? change.displayProposed ?? change.newValue ?? "";
-    const imageInfo =
-      ruleKey === "filename" && resource
-        ? this.findImageForChange(change, resource)
-        : null;
     const { status, hint } = this.evaluateProposedValue(
       ruleKey,
       proposed,
       change.resourceType,
       resource,
-      imageInfo
+      null
     );
 
     return {
@@ -651,16 +524,114 @@ window.EditProCatalogQuality = {
     if (!selectedIssues || selectedIssues.size === 0) {
       return true;
     }
-    const issues = this.getIssues(resourceType, resource);
     for (const key of selectedIssues) {
-      if (issues.includes(key)) {
+      if (key === "seoTitle" && this.hasSeoTitleFilterIssue(resourceType, resource)) {
+        return true;
+      }
+      if (key === "seoDescription" && this.hasSeoDescriptionFilterIssue(resourceType, resource)) {
+        return true;
+      }
+      if (
+        key === "descriptionParagraphs"
+        && this.hasProductDescriptionFormattingIssue(resourceType, resource)
+      ) {
+        return true;
+      }
+      if (this.getIssues(resourceType, resource).includes(key)) {
         return true;
       }
     }
     return false;
   },
 
-  chipsForTab(_tab) {
-    return Object.keys(this.ISSUES);
+  chipsForTab(tab) {
+    return Object.keys(this.ISSUES).filter((key) => {
+      if (key === "title" || key === "descriptionLength" || key === "filename") {
+        return false;
+      }
+      if (key === "descriptionParagraphs" && tab !== "products") {
+        return false;
+      }
+      return true;
+    });
+  },
+
+  LEGACY_SEO_DESCRIPTION_OK:
+    "Original Painting starts ₹499. Free shipping & fast delivery",
+
+  hasSeoTitleFilterIssue(resourceType, resource) {
+    const current = String(resource.seo?.title || "").trim();
+    if (!current) {
+      return true;
+    }
+    const rules = EditProRules.getRulesForType(resourceType);
+    if (!rules?.seoTitle) {
+      return false;
+    }
+    if (EditProRules.templateHasRandomTokens(rules.seoTitle)) {
+      return false;
+    }
+    const shopName = window.EditProSettings?.shopName || "";
+    const expected = EditProRules.expectedSeoTitle(resourceType, resource, shopName, rules);
+    if (expected == null) {
+      return false;
+    }
+    return current !== expected;
+  },
+
+  hasSeoDescriptionFilterIssue(resourceType, resource) {
+    const current = String(resource.seo?.description || "").trim();
+    if (
+      resourceType === "product"
+      && current.includes(this.LEGACY_SEO_DESCRIPTION_OK)
+    ) {
+      return false;
+    }
+    if (!current) {
+      return true;
+    }
+    const rules = EditProRules.getRulesForType(resourceType);
+    if (!rules?.seoDescription) {
+      return false;
+    }
+    if (EditProRules.templateHasRandomTokens(rules.seoDescription)) {
+      return false;
+    }
+    const shopName = window.EditProSettings?.shopName || "";
+    const expected = EditProRules.expectedSeoDescription(resourceType, resource, shopName, rules);
+    if (expected == null) {
+      return false;
+    }
+    return current !== expected;
+  },
+
+  hasProductDescriptionFormattingIssue(resourceType, resource) {
+    if (resourceType !== "product") {
+      return false;
+    }
+    if (resource.descriptionHtml === undefined) {
+      return false;
+    }
+    const body = resource.descriptionHtml || "";
+    const plain = EditProUtils.stripHtml(body);
+    if (!plain.trim()) {
+      return false;
+    }
+    return !EditProUtils.hasParagraphStructure(body);
+  },
+
+  hasFilenameIssue(resourceType, resource) {
+    if (this.evaluateFilenameRule(resourceType, resource).status === "fail") {
+      return true;
+    }
+    const shopName = window.EditProSettings?.shopName || "";
+    return EditProRules.resourceHasFilenamePrefixMismatch(resourceType, resource, shopName);
+  },
+
+  matchesFilenameIssueFilter(resourceType, resource, active) {
+    if (!active) {
+      return true;
+    }
+    return this.hasFilenameIssue(resourceType, resource);
   },
 };

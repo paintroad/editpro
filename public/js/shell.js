@@ -9,6 +9,7 @@
   const moduleLocal = document.getElementById("module-local");
   const moduleLive = document.getElementById("module-live");
   const moduleSquare = document.getElementById("module-square");
+  const moduleCatalog = document.getElementById("module-catalog");
   const moduleRoommap = document.getElementById("module-roommap");
   const connectionModal = document.getElementById("connectionModal");
   const settingsModal = document.getElementById("settingsModal");
@@ -28,6 +29,9 @@
     }
     if (moduleSquare) {
       moduleSquare.hidden = moduleId !== "square";
+    }
+    if (moduleCatalog) {
+      moduleCatalog.hidden = moduleId !== "catalog";
     }
     if (moduleRoommap) {
       moduleRoommap.hidden = moduleId !== "roommap";

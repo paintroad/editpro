@@ -7,6 +7,8 @@ const {
   getPublicSettings,
   getShopifyCredentials,
   loadConfig,
+  getOpenAiApiKey,
+  maskToken,
 } = require("./lib/config-store");
 const {
   loadSyncLog,
@@ -22,13 +24,31 @@ const {
   getExcelPath,
   excelExists,
 } = require("./lib/square-paintings-store");
-const { enumerateCatalogImages } = require("./lib/catalog-images");
+const { enumerateCatalogImages, isPortraitProductImage } = require("./lib/catalog-images");
+const { isNoneRoom } = require("./lib/room-utils");
 const {
   loadImageRoomMap,
-  upsertMapping,
+  getRoomForImage,
+  hasMappingForImage,
+  reconcileImageRoomMap,
 } = require("./lib/image-room-store");
-const { detectRoomFromImageUrl } = require("./lib/room-detector");
-const { checkStatus, startOllama, stopOllama } = require("./lib/ollama-service");
+const { clearCache, getCacheStats } = require("./lib/image-cache");
+const { importCatalog } = require("./lib/catalog-importer");
+const {
+  loadCatalogStore,
+  saveCatalogStore,
+  mergeImportResults,
+  listProductSummaries,
+  getProduct,
+  computeLifestyleStats,
+} = require("./lib/catalog-products-store");
+const { productsToCsv } = require("./lib/catalog-export");
+const roomScanRunner = require("./lib/room-scan-runner");
+const catalogEnrichRunner = require("./lib/catalog-enrich-runner");
+const lifestyleRunner = require("./lib/lifestyle-runner");
+const orientationRunner = require("./lib/orientation-runner");
+const pythonSetup = require("./lib/python-setup");
+const { summarizeFrameTemplates } = require("./lib/frame-template-parser");
 
 const app = express();
 const PORT = process.env.PORT || 3847;
@@ -412,6 +432,7 @@ router.get("/api/image-room-map", (_req, res) => {
   try {
     const store = loadImageRoomMap();
     res.json({
+      version: store.version,
       mappings: store.mappings,
       updatedAt: store.updatedAt,
       count: Object.keys(store.mappings).length,
@@ -421,23 +442,50 @@ router.get("/api/image-room-map", (_req, res) => {
   }
 });
 
+router.post("/api/image-room-map/reconcile", (req, res) => {
+  try {
+    const storeData = req.body?.storeData || {};
+    const result = reconcileImageRoomMap(storeData);
+    const store = loadImageRoomMap();
+    res.json({
+      ...result,
+      mappings: store.mappings,
+      updatedAt: store.updatedAt,
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to reconcile image room map." });
+  }
+});
+
 router.post("/api/image-room-map/summary", (req, res) => {
   try {
     const storeData = req.body?.storeData || {};
     const images = enumerateCatalogImages(storeData);
-    const mappings = loadImageRoomMap().mappings;
-    const rows = images.map((img) => ({
-      ...img,
-      room: mappings[img.fileId]?.room || "",
-      mapped: Boolean(mappings[img.fileId]),
-    }));
-    const mapped = rows.filter((r) => r.mapped).length;
-    const total = rows.length;
+    const store = loadImageRoomMap();
+    const portraits = images.filter((img) => isPortraitProductImage(img)).length;
+    const lifestyleImages = images.filter((img) => !isPortraitProductImage(img));
+    const rows = lifestyleImages.map((img) => {
+      const room = getRoomForImage(img, store);
+      const hasMapping = hasMappingForImage(img, store);
+      const mapped = hasMapping && !isNoneRoom(room);
+      return {
+        ...img,
+        room,
+        mapped,
+        hasMapping,
+      };
+    });
+    const lifestyleMapped = rows.filter((r) => r.mapped).length;
+    const scannable = lifestyleImages.length;
+    const unmapped = scannable - lifestyleMapped;
     res.json({
-      total,
-      mapped,
-      unmapped: total - mapped,
-      complete: total > 0 && mapped === total,
+      total: images.length,
+      portraits,
+      scannable,
+      lifestyleMapped,
+      mapped: portraits + lifestyleMapped,
+      unmapped,
+      complete: scannable > 0 ? unmapped === 0 : portraits > 0,
       rows,
     });
   } catch (error) {
@@ -445,100 +493,312 @@ router.post("/api/image-room-map/summary", (req, res) => {
   }
 });
 
-router.post("/api/image-room-map/scan", async (req, res) => {
-  let aborted = false;
-  req.on("aborted", () => {
-    aborted = true;
+router.post("/api/image-room-map/scan/start", async (_req, res) => {
+  try {
+    const status = roomScanRunner.getStatus();
+    if (status.state === "running" || status.state === "paused") {
+      return res.status(409).json({ error: "A room mapping job is already running.", ...status });
+    }
+    const result = await roomScanRunner.start();
+    res.status(202).json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to start room mapping." });
+  }
+});
+
+router.get("/api/image-room-map/scan/status", (_req, res) => {
+  try {
+    res.json(roomScanRunner.getStatus());
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to read scan status." });
+  }
+});
+
+router.post("/api/image-room-map/scan/stop", (_req, res) => {
+  try {
+    res.json(roomScanRunner.stop());
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to stop room mapping." });
+  }
+});
+
+router.post("/api/image-room-map/cache/clear", (_req, res) => {
+  try {
+    const stats = clearCache();
+    res.json({ message: "Image cache cleared.", ...stats });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to clear image cache." });
+  }
+});
+
+router.get("/api/image-room-map/cache/stats", (_req, res) => {
+  try {
+    res.json(getCacheStats());
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to read cache stats." });
+  }
+});
+
+router.post("/api/image-room-map/scan", async (_req, res) => {
+  res.status(410).json({
+    error: "This endpoint is deprecated. Use POST /api/image-room-map/scan/start instead.",
   });
+});
 
-  res.setHeader("Content-Type", "application/x-ndjson");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("X-Accel-Buffering", "no");
-
+router.get("/api/openai/status", (_req, res) => {
   try {
-    const images = Array.isArray(req.body?.images) ? req.body.images : [];
-    const existing = loadImageRoomMap().mappings;
-    const toScan = images.filter((img) => img?.fileId && img?.url && !existing[img.fileId]);
-    const config = loadConfig();
-    const roomOptions = config.roomDetection || {};
-
-    let mapped = 0;
-    let skipped = images.length - toScan.length;
-
-    for (let i = 0; i < toScan.length; i++) {
-      if (aborted) {
-        break;
-      }
-      const img = toScan[i];
-      const room = await detectRoomFromImageUrl(img.url, roomOptions);
-      upsertMapping({
-        fileId: img.fileId,
-        resourceType: img.resourceType,
-        resourceId: img.resourceId,
-        resourceTitle: img.resourceTitle,
-        imageIndex: img.imageIndex,
-        url: img.url,
-        room,
-        source: "ollama",
-      });
-      mapped += 1;
-      if (!res.writableEnded) {
-        res.write(
-          `${JSON.stringify({
-            event: "progress",
-            current: i + 1,
-            total: toScan.length,
-            fileId: img.fileId,
-            room,
-          })}\n`
-        );
-      }
-    }
-
-    if (!aborted && !res.writableEnded) {
-      res.write(`${JSON.stringify({ event: "done", mapped, skipped })}\n`);
-      res.end();
-    }
+    const apiKey = getOpenAiApiKey();
+    res.json({
+      configured: Boolean(apiKey),
+      apiKeyMasked: maskToken(apiKey),
+    });
   } catch (error) {
-    if (!res.writableEnded) {
-      res.write(
-        `${JSON.stringify({ event: "error", error: error.message || "Room mapping failed." })}\n`
-      );
-      res.end();
-    }
+    res.status(400).json({ error: error.message || "Failed to check OpenAI status." });
   }
 });
 
-router.get("/api/ollama/status", async (req, res) => {
+router.get("/api/catalog/products", (_req, res) => {
   try {
-    const config = loadConfig();
-    const host = req.query.host || config.roomDetection?.ollamaHost || "http://localhost:11434";
-    const status = await checkStatus(host);
-    res.json(status);
+    const store = loadCatalogStore();
+    const products = listProductSummaries(store);
+    const enriched = products.filter((p) => p.status === "enriched").length;
+    const pending = products.filter((p) => p.status === "imported").length;
+    const errors = products.filter((p) => p.status === "error").length;
+    res.json({
+      catalogPath: store.catalogPath,
+      lastImportAt: store.lastImportAt,
+      total: products.length,
+      enriched,
+      pending,
+      errors,
+      lifestyleStats: computeLifestyleStats(store),
+      lifestyleSettings: store.lifestyleSettings || null,
+      products,
+    });
   } catch (error) {
-    res.status(400).json({ error: error.message || "Failed to check Ollama status." });
+    res.status(500).json({ error: error.message || "Failed to list catalog products." });
   }
 });
 
-router.post("/api/ollama/start", async (req, res) => {
+router.get("/api/catalog/products/:productId", (req, res) => {
   try {
-    const config = loadConfig();
-    const host = req.body?.host || config.roomDetection?.ollamaHost || "http://localhost:11434";
-    const result = await startOllama(host);
+    const product = getProduct(req.params.productId);
+    if (!product) {
+      return res.status(404).json({ error: "Product not found." });
+    }
+    res.json(product);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to load product." });
+  }
+});
+
+router.get("/api/catalog/products/:productId/image/:index", (req, res) => {
+  try {
+    const product = getProduct(req.params.productId);
+    if (!product) {
+      return res.status(404).json({ error: "Product not found." });
+    }
+    const imageIndex = parseInt(req.params.index, 10);
+    const image = product.images?.find((img) => img.index === imageIndex);
+    if (!image?.path || !fs.existsSync(image.path)) {
+      return res.status(404).json({ error: "Image not found." });
+    }
+    res.sendFile(path.resolve(image.path));
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to serve image." });
+  }
+});
+
+router.get("/api/catalog/products/:productId/lifestyle/:index", (req, res) => {
+  try {
+    const product = getProduct(req.params.productId);
+    if (!product) {
+      return res.status(404).json({ error: "Product not found." });
+    }
+    const imageIndex = parseInt(req.params.index, 10);
+    const image = product.lifestyleImages?.find((img) => img.index === imageIndex);
+    if (!image?.path || !fs.existsSync(image.path)) {
+      return res.status(404).json({ error: "Lifestyle image not found." });
+    }
+    res.sendFile(path.resolve(image.path));
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to serve lifestyle image." });
+  }
+});
+
+router.get("/api/catalog/lifestyle/preflight", (_req, res) => {
+  try {
+    res.json(pythonSetup.getPreflightStatus());
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to check Python environment." });
+  }
+});
+
+router.post("/api/catalog/lifestyle/setup", async (_req, res) => {
+  try {
+    const result = await pythonSetup.runSetup();
     res.json(result);
   } catch (error) {
-    res.status(400).json({ error: error.message || "Failed to start Ollama." });
+    res.status(500).json({ error: error.message || "Python setup failed." });
   }
 });
 
-router.post("/api/ollama/stop", async (req, res) => {
+router.post("/api/catalog/lifestyle/validate-frames", (req, res) => {
   try {
-    const config = loadConfig();
-    const host = req.body?.host || config.roomDetection?.ollamaHost || "http://localhost:11434";
-    const result = await stopOllama(host);
-    res.json(result);
+    const { frameTemplatesPath } = req.body || {};
+    res.json(summarizeFrameTemplates(frameTemplatesPath));
   } catch (error) {
-    res.status(400).json({ error: error.message || "Failed to stop Ollama." });
+    res.status(400).json({ error: error.message || "Failed to validate frame templates." });
+  }
+});
+
+router.post("/api/catalog/lifestyle/start", async (req, res) => {
+  try {
+    const { productIds, frameTemplatesPath, outputPath } = req.body || {};
+    if (!Array.isArray(productIds) || !productIds.length) {
+      return res.status(400).json({ error: "Select at least one product." });
+    }
+    const ids = productIds.map((id) => String(id || "").trim()).filter(Boolean);
+    const result = await lifestyleRunner.start({
+      productIds: ids,
+      frameTemplatesPath,
+      outputPath,
+    });
+    res.status(202).json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to start lifestyle generation." });
+  }
+});
+
+router.get("/api/catalog/lifestyle/status", (_req, res) => {
+  try {
+    res.json(lifestyleRunner.getStatus());
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to read lifestyle status." });
+  }
+});
+
+router.post("/api/catalog/lifestyle/stop", (_req, res) => {
+  try {
+    res.json(lifestyleRunner.stop());
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to stop lifestyle generation." });
+  }
+});
+
+router.post("/api/catalog/orientation/start", async (req, res) => {
+  try {
+    const { productIds } = req.body || {};
+    let ids = null;
+    if (productIds != null) {
+      if (!Array.isArray(productIds)) {
+        return res.status(400).json({ error: "productIds must be an array of product IDs." });
+      }
+      ids = productIds.map((id) => String(id || "").trim()).filter(Boolean);
+    }
+    const result = await orientationRunner.start({ productIds: ids });
+    res.status(202).json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to start orientation detection." });
+  }
+});
+
+router.get("/api/catalog/orientation/status", (_req, res) => {
+  try {
+    res.json(orientationRunner.getStatus());
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to read orientation status." });
+  }
+});
+
+router.post("/api/catalog/orientation/stop", (_req, res) => {
+  try {
+    res.json(orientationRunner.stop());
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to stop orientation detection." });
+  }
+});
+
+router.post("/api/catalog/import", async (req, res) => {
+  try {
+    const { catalogPath } = req.body || {};
+    if (!catalogPath || typeof catalogPath !== "string") {
+      return res.status(400).json({ error: "Catalog path is required." });
+    }
+    const importResult = await importCatalog(catalogPath);
+    const store = loadCatalogStore();
+    const mergeStats = mergeImportResults(store, importResult);
+    saveCatalogStore(store);
+    if (mergeStats.orientationProductIds?.length) {
+      orientationRunner
+        .start({ productIds: mergeStats.orientationProductIds })
+        .catch(() => {});
+    }
+    res.json({
+      ...mergeStats,
+      catalogPath: store.catalogPath,
+      lastImportAt: store.lastImportAt,
+      imported: importResult.products.length,
+      totalFolders: importResult.total,
+      skipped: importResult.skipped,
+      lifestyleStats: computeLifestyleStats(store),
+      lifestyleSettings: store.lifestyleSettings || null,
+      products: listProductSummaries(store),
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Catalog import failed." });
+  }
+});
+
+router.post("/api/catalog/enrich/start", async (req, res) => {
+  try {
+    const { productIds } = req.body || {};
+    let ids = null;
+    if (productIds != null) {
+      if (!Array.isArray(productIds)) {
+        return res.status(400).json({ error: "productIds must be an array of product IDs." });
+      }
+      ids = productIds.map((id) => String(id || "").trim()).filter(Boolean);
+      if (!ids.length) {
+        return res.status(400).json({ error: "Select at least one product to generate." });
+      }
+    }
+    const result = await catalogEnrichRunner.start({ productIds: ids });
+    res.status(202).json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to start catalog enrichment." });
+  }
+});
+
+router.get("/api/catalog/enrich/status", (_req, res) => {
+  try {
+    res.json(catalogEnrichRunner.getStatus());
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to read enrich status." });
+  }
+});
+
+router.post("/api/catalog/enrich/stop", (_req, res) => {
+  try {
+    res.json(catalogEnrichRunner.stop());
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to stop catalog enrichment." });
+  }
+});
+
+router.get("/api/catalog/export", (_req, res) => {
+  try {
+    const store = loadCatalogStore();
+    const products = Object.values(store.products).filter((p) => p.status === "enriched");
+    if (!products.length) {
+      return res.status(404).json({ error: "No enriched products to export." });
+    }
+    const csv = productsToCsv(products);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="catalog-products.csv"');
+    res.send(csv);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to export catalog." });
   }
 });
 
@@ -570,4 +830,6 @@ app.listen(PORT, () => {
       console.log(`Open ${directUrl} in your browser.`);
     }
   }
+
+  orientationRunner.startMissing().catch(() => {});
 });

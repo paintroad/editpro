@@ -14,18 +14,21 @@ window.EditProLiveCatalog = {
         collectionId: "",
         sort: "title-asc",
         qualityIssues: new Set(),
+        filenameIssues: false,
       },
       collections: {
         search: "",
         type: "",
         sort: "title-asc",
         qualityIssues: new Set(),
+        filenameIssues: false,
       },
       articles: {
         search: "",
         blogId: "",
         sort: "title-asc",
         qualityIssues: new Set(),
+        filenameIssues: false,
       },
     };
     this.selectedProductIds = new Set();
@@ -61,7 +64,16 @@ window.EditProLiveCatalog = {
       const chip = e.target.closest("[data-quality-issue]");
       if (chip) {
         this.toggleQualityIssue(chip.dataset.qualityIssue);
+        return;
       }
+      if (e.target.closest("[data-filename-issues-filter]")) {
+        this.toggleFilenameIssuesFilter();
+      }
+    });
+
+    document.addEventListener("editpro:settings-saved", () => {
+      this.renderFilterBar();
+      this.renderList();
     });
 
     document.getElementById("clearSelectionBtn")?.addEventListener("click", () => {
@@ -173,6 +185,15 @@ window.EditProLiveCatalog = {
     this.renderList();
   },
 
+  toggleFilenameIssuesFilter() {
+    const f = this.filters[this.activeTab];
+    f.filenameIssues = !f.filenameIssues;
+    this.page[this.activeTab] = 1;
+    this.resetSelectAllBarState();
+    this.renderFilterBar();
+    this.renderList();
+  },
+
   applyRuleFilter(tab, ruleKey) {
     const validTabs = ["products", "collections", "articles"];
     if (!validTabs.includes(tab)) {
@@ -186,8 +207,11 @@ window.EditProLiveCatalog = {
 
     for (const tabId of validTabs) {
       this.filters[tabId].qualityIssues = new Set();
+      this.filters[tabId].filenameIssues = false;
     }
-    if (ruleKey) {
+    if (ruleKey === "filename") {
+      this.filters[tab].filenameIssues = true;
+    } else if (ruleKey) {
       this.filters[tab].qualityIssues.add(ruleKey);
     }
     this.page[tab] = 1;
@@ -341,12 +365,15 @@ window.EditProLiveCatalog = {
 
   renderQualityChips() {
     const f = this.filters[this.activeTab];
-    return EditProCatalogQuality.chipsForTab(this.activeTab)
+    const filenameActive = f.filenameIssues ? " active" : "";
+    const qualityChips = EditProCatalogQuality.chipsForTab(this.activeTab)
       .map((key) => {
         const active = f.qualityIssues.has(key) ? " active" : "";
         return `<button type="button" class="filter-chip${active}" data-quality-issue="${EditProUtils.escapeHtml(key)}">${EditProUtils.escapeHtml(EditProCatalogQuality.ISSUES[key])}</button>`;
       })
       .join("");
+    const filenameChip = `<button type="button" class="filter-chip${filenameActive}" data-filename-issues-filter>Filename</button>`;
+    return `${qualityChips}${filenameChip}`;
   },
 
   renderFilterBar() {
@@ -436,6 +463,11 @@ window.EditProLiveCatalog = {
           return false;
         }
       }
+      if (
+        !EditProCatalogQuality.matchesFilenameIssueFilter("product", p, f.filenameIssues)
+      ) {
+        return false;
+      }
       return EditProCatalogQuality.matchesQualityFilter("product", p, f.qualityIssues);
     });
   },
@@ -449,6 +481,11 @@ window.EditProLiveCatalog = {
       if (f.type && c.collectionType !== f.type) {
         return false;
       }
+      if (
+        !EditProCatalogQuality.matchesFilenameIssueFilter("collection", c, f.filenameIssues)
+      ) {
+        return false;
+      }
       return EditProCatalogQuality.matchesQualityFilter("collection", c, f.qualityIssues);
     });
   },
@@ -460,6 +497,11 @@ window.EditProLiveCatalog = {
         return false;
       }
       if (f.blogId && a.blog?.id !== f.blogId) {
+        return false;
+      }
+      if (
+        !EditProCatalogQuality.matchesFilenameIssueFilter("article", a, f.filenameIssues)
+      ) {
         return false;
       }
       return EditProCatalogQuality.matchesQualityFilter("article", a, f.qualityIssues);

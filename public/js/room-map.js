@@ -1,29 +1,33 @@
 (function initRoomMapModule() {
   const coverageEl = document.getElementById("roomMapCoverage");
+  const scanStatusEl = document.getElementById("roomMapScanStatus");
   const statusBadge = document.getElementById("roomMapStatusBadge");
-  const ollamaHostInput = document.getElementById("roomMapOllamaHost");
-  const ollamaModelInput = document.getElementById("roomMapOllamaModel");
-  const saveOllamaBtn = document.getElementById("roomMapSaveOllamaBtn");
+  const openAiModelInput = document.getElementById("roomMapOpenAiModel");
+  const openAiKeyInput = document.getElementById("roomMapOpenAiKey");
+  const openAiConcurrencyInput = document.getElementById("roomMapOpenAiConcurrency");
+  const saveOpenAiBtn = document.getElementById("roomMapSaveOpenAiBtn");
   const mapBtn = document.getElementById("roomMapScanBtn");
   const searchInput = document.getElementById("roomMapSearch");
-  const unmappedOnlyToggle = document.getElementById("roomMapUnmappedOnly");
   const sortSelect = document.getElementById("roomMapSort");
+  const filterBar = document.querySelector("#module-roommap .room-map-filter-bar");
+  const paginationEl = document.getElementById("roomMapPagination");
+  const pageInfoEl = document.getElementById("roomMapPageInfo");
+  const prevBtn = document.getElementById("roomMapPrevBtn");
+  const nextBtn = document.getElementById("roomMapNextBtn");
   const tableBody = document.getElementById("roomMapTableBody");
   const messageEl = document.getElementById("roomMapMessage");
   const emptyEl = document.getElementById("roomMapEmpty");
   const tableWrap = document.getElementById("roomMapTableWrap");
-  const scanOverlay = document.getElementById("roomMapScanOverlay");
-  const scanProgressEl = document.getElementById("roomMapScanProgress");
-  const ollamaStatusBadge = document.getElementById("roomMapOllamaStatusBadge");
-  const ollamaStatusText = document.getElementById("roomMapOllamaStatusText");
-  const ollamaRefreshBtn = document.getElementById("roomMapOllamaRefreshBtn");
-  const ollamaStartBtn = document.getElementById("roomMapOllamaStartBtn");
-  const ollamaStopBtn = document.getElementById("roomMapOllamaStopBtn");
+  const openAiStatusBadge = document.getElementById("roomMapOpenAiStatusBadge");
+  const openAiStatusText = document.getElementById("roomMapOpenAiStatusText");
 
-  let scanning = false;
+  let jobActive = false;
   let summary = null;
-  let ollamaStatus = null;
-  let ollamaPollTimer = null;
+  let openAiConfigured = false;
+  let renderTableTimer = null;
+  const PAGE_SIZE = 50;
+  let currentPage = 1;
+  let mapFilter = "all";
 
   function getStoreData() {
     return window.EditProLive?.getStoreData?.() || {
@@ -53,160 +57,208 @@
     return "Blog";
   }
 
-  function getOllamaHost() {
-    return ollamaHostInput?.value.trim() || window.EditProSettings?.roomDetection?.ollamaHost || "http://localhost:11434";
+  function formatNumber(n) {
+    return Number(n || 0).toLocaleString();
   }
 
-  function renderOllamaStatus(status) {
-    ollamaStatus = status;
-    if (!ollamaStatusBadge || !ollamaStatusText) {
+  function formatResumeCountdown(resumeAt) {
+    if (!resumeAt) {
+      return "";
+    }
+    const ms = new Date(resumeAt).getTime() - Date.now();
+    if (ms <= 0) {
+      return "soon";
+    }
+    const mins = Math.ceil(ms / 60000);
+    return mins <= 1 ? "about 1 minute" : `about ${mins} minutes`;
+  }
+
+  function renderScanStatus(status) {
+    if (!scanStatusEl) {
+      return;
+    }
+    if (!status || !EditProImageRoomMap.isJobActive(status)) {
+      if (status?.state === "done") {
+        scanStatusEl.hidden = false;
+        const portraitNote =
+          status.portraits > 0 ? ` ${status.portraits} portrait${status.portraits === 1 ? "" : "s"} auto-mapped.` : "";
+        scanStatusEl.textContent = `Finished — mapped ${status.mapped} lifestyle image${status.mapped === 1 ? "" : "s"}.${portraitNote}`;
+        scanStatusEl.className = "meta room-map-scan-status room-map-scan-status--done";
+        return;
+      }
+      if (status?.state === "stopped") {
+        scanStatusEl.hidden = false;
+        scanStatusEl.textContent = `Stopped — mapped ${status.mapped} of ${status.total}.`;
+        scanStatusEl.className = "meta room-map-scan-status room-map-scan-status--stopped";
+        return;
+      }
+      if (status?.state === "error") {
+        scanStatusEl.hidden = false;
+        scanStatusEl.textContent = status.error || "Room mapping failed.";
+        scanStatusEl.className = "meta room-map-scan-status room-map-scan-status--error";
+        return;
+      }
+      scanStatusEl.hidden = true;
+      scanStatusEl.textContent = "";
+      return;
+    }
+
+    scanStatusEl.hidden = false;
+    if (status.state === "paused") {
+      const when = formatResumeCountdown(status.resumeAt);
+      scanStatusEl.textContent = `Paused (${status.pauseReason || "system load"}) — resumes in ${when}.`;
+      scanStatusEl.className = "meta room-map-scan-status room-map-scan-status--paused";
+      return;
+    }
+
+    const phase =
+      status.phase === "catalog"
+        ? "Loading catalog…"
+        : `Mapping ${status.current} / ${status.total}${status.concurrency ? ` (${status.concurrency} parallel)` : ""}`;
+    const detail =
+      status.lastResourceTitle && status.lastRoom
+        ? ` — ${EditProImageRoomMap.roomToTitleCase(status.lastRoom)} on ${status.lastResourceTitle}`
+        : "";
+    scanStatusEl.textContent = `${phase}${detail}`;
+    scanStatusEl.className = "meta room-map-scan-status room-map-scan-status--running";
+  }
+
+  function renderOpenAiStatus(status) {
+    openAiConfigured = Boolean(status?.configured);
+    if (!openAiStatusBadge || !openAiStatusText) {
       return;
     }
 
     if (!status) {
-      ollamaStatusBadge.textContent = "Checking…";
-      ollamaStatusBadge.className = "room-map-ollama-pill room-map-ollama-pill--checking";
-      ollamaStatusText.textContent = "Checking Ollama status…";
+      openAiStatusBadge.textContent = "Checking…";
+      openAiStatusBadge.className = "room-map-openai-pill room-map-openai-pill--checking";
+      openAiStatusText.textContent = "Checking API key…";
+      updateMapButton();
       return;
     }
 
-    if (!status.installed) {
-      ollamaStatusBadge.textContent = "Not installed";
-      ollamaStatusBadge.className = "room-map-ollama-pill room-map-ollama-pill--missing";
-      ollamaStatusText.textContent =
-        "Ollama was not found on this machine. Install from ollama.com/download, then click Start Ollama.";
-    } else if (status.running) {
-      ollamaStatusBadge.textContent = "Running";
-      ollamaStatusBadge.className = "room-map-ollama-pill room-map-ollama-pill--running";
-      const modelHint = status.models?.length
-        ? `Models: ${status.models.slice(0, 4).join(", ")}${status.models.length > 4 ? "…" : ""}`
-        : "No models pulled yet — run ollama pull gemma3:4b";
-      ollamaStatusText.textContent = `Connected to ${status.host}. ${modelHint}`;
+    if (status.configured) {
+      openAiStatusBadge.textContent = "Configured";
+      openAiStatusBadge.className = "room-map-openai-pill room-map-openai-pill--running";
+      const masked = status.apiKeyMasked ? ` Key: ${status.apiKeyMasked}` : "";
+      openAiStatusText.textContent = `OpenAI API key is ready.${masked}`;
     } else {
-      ollamaStatusBadge.textContent = "Stopped";
-      ollamaStatusBadge.className = "room-map-ollama-pill room-map-ollama-pill--stopped";
-      ollamaStatusText.textContent = status.error
-        ? `Not reachable at ${status.host}. ${status.error}`
-        : `Not running at ${status.host}. Click Start Ollama to launch it.`;
+      openAiStatusBadge.textContent = "Missing key";
+      openAiStatusBadge.className = "room-map-openai-pill room-map-openai-pill--missing";
+      openAiStatusText.textContent =
+        "Set OPENAI_API_KEY in the server environment or save a key below.";
     }
-
-    if (ollamaStartBtn) {
-      ollamaStartBtn.disabled = scanning || !status.installed || status.running;
-    }
-    if (ollamaStopBtn) {
-      ollamaStopBtn.disabled = scanning || !status.running;
-    }
-    if (mapBtn && summary) {
-      mapBtn.disabled = scanning || !hasCatalog() || summary.unmapped === 0 || !status.running;
-    }
+    updateMapButton();
   }
 
-  async function refreshOllamaStatus() {
+  function updateMapButton() {
+    if (!mapBtn || !summary) {
+      return;
+    }
+    if (jobActive) {
+      mapBtn.disabled = false;
+      mapBtn.textContent = "Stop mapping";
+      mapBtn.classList.remove("btn-primary");
+      mapBtn.classList.add("btn-secondary");
+      return;
+    }
+    mapBtn.classList.add("btn-primary");
+    mapBtn.classList.remove("btn-secondary");
+    mapBtn.disabled = !hasCatalog() || summary.unmapped === 0 || !openAiConfigured;
+    mapBtn.textContent =
+      summary.unmapped > 0
+        ? `Map unmapped images (${formatNumber(summary.unmapped)})`
+        : "All lifestyle images mapped";
+  }
+
+  async function refreshOpenAiStatus() {
+    const rd = window.EditProSettings?.roomDetection || {};
+    const settingsFallback = {
+      configured: Boolean(rd.hasOpenAiApiKey),
+      apiKeyMasked: rd.openaiApiKeyMasked || "",
+    };
     try {
-      const host = encodeURIComponent(getOllamaHost());
-      const status = await EditProUtils.apiGet(`/api/ollama/status?host=${host}`);
-      renderOllamaStatus(status);
+      const status = await EditProUtils.apiGet("/api/openai/status");
+      renderOpenAiStatus(status);
       return status;
     } catch (error) {
-      renderOllamaStatus({
-        running: false,
-        installed: false,
-        host: getOllamaHost(),
-        error: error.message,
-      });
+      if (settingsFallback.configured) {
+        renderOpenAiStatus(settingsFallback);
+        return settingsFallback;
+      }
+      renderOpenAiStatus({ configured: false, error: error.message });
       return null;
     }
   }
 
-  async function startOllamaService() {
-    EditProUtils.hideMessage(messageEl);
-    if (ollamaStartBtn) {
-      ollamaStartBtn.disabled = true;
-      ollamaStartBtn.textContent = "Starting…";
-    }
-    try {
-      const result = await EditProUtils.apiPost("/api/ollama/start", { host: getOllamaHost() });
-      renderOllamaStatus(result);
-      EditProUtils.showMessage(messageEl, result.message || "Ollama started.", "success");
-    } catch (error) {
-      EditProUtils.showMessage(messageEl, error.message, "error");
-      await refreshOllamaStatus();
-    } finally {
-      if (ollamaStartBtn) {
-        ollamaStartBtn.textContent = "Start Ollama";
-      }
-    }
+  function getShopifyStoreDomain() {
+    return (
+      window.EditProSettings?.storeDomain ||
+      document.getElementById("storeDomain")?.value?.trim() ||
+      ""
+    );
   }
 
-  async function stopOllamaService() {
-    EditProUtils.hideMessage(messageEl);
-    if (ollamaStopBtn) {
-      ollamaStopBtn.disabled = true;
-      ollamaStopBtn.textContent = "Stopping…";
-    }
-    try {
-      const result = await EditProUtils.apiPost("/api/ollama/stop", { host: getOllamaHost() });
-      renderOllamaStatus({ ...ollamaStatus, running: false, installed: ollamaStatus?.installed });
-      EditProUtils.showMessage(messageEl, result.message || "Ollama stopped.", "success");
-      await refreshOllamaStatus();
-    } catch (error) {
-      EditProUtils.showMessage(messageEl, error.message, "error");
-      await refreshOllamaStatus();
-    } finally {
-      if (ollamaStopBtn) {
-        ollamaStopBtn.textContent = "Stop Ollama";
-      }
-    }
-  }
-
-  function startOllamaPolling() {
-    stopOllamaPolling();
-    ollamaPollTimer = setInterval(() => {
-      if (window.EditProShell?.getActiveModule?.() === "roommap" && !scanning) {
-        refreshOllamaStatus();
-      }
-    }, 10000);
-  }
-
-  function stopOllamaPolling() {
-    if (ollamaPollTimer) {
-      clearInterval(ollamaPollTimer);
-      ollamaPollTimer = null;
-    }
-  }
-
-  function applyOllamaFields() {
+  function applyOpenAiFields() {
     const rd = window.EditProSettings?.roomDetection || {};
-    if (ollamaHostInput) {
-      ollamaHostInput.value = rd.ollamaHost || "http://localhost:11434";
+    if (openAiModelInput) {
+      openAiModelInput.value = rd.openaiModel || "gpt-4o";
     }
-    if (ollamaModelInput) {
-      ollamaModelInput.value = rd.ollamaModel || "gemma3:4b";
+    if (openAiConcurrencyInput) {
+      openAiConcurrencyInput.value = String(rd.openaiConcurrency ?? 8);
+    }
+    if (openAiKeyInput) {
+      openAiKeyInput.value = "";
+      openAiKeyInput.placeholder = rd.hasOpenAiApiKey
+        ? `Saved key: ${rd.openaiApiKeyMasked} (leave blank to keep)`
+        : "sk-… (or set OPENAI_API_KEY env)";
+    }
+    if (rd.hasOpenAiApiKey) {
+      renderOpenAiStatus({
+        configured: true,
+        apiKeyMasked: rd.openaiApiKeyMasked,
+      });
     }
   }
 
-  async function saveOllamaSettings() {
+  async function saveOpenAiSettings() {
     EditProUtils.hideMessage(messageEl);
-    saveOllamaBtn.disabled = true;
-    saveOllamaBtn.textContent = "Saving…";
+    saveOpenAiBtn.disabled = true;
+    saveOpenAiBtn.textContent = "Saving…";
     try {
+      const roomDetection = {
+        openaiModel: openAiModelInput?.value.trim() || "gpt-4o",
+        openaiConcurrency: Math.min(
+          32,
+          Math.max(1, parseInt(openAiConcurrencyInput?.value, 10) || 8)
+        ),
+      };
+      const keyValue = openAiKeyInput?.value.trim();
+      if (keyValue) {
+        roomDetection.openaiApiKey = keyValue;
+      }
       const data = await EditProUtils.apiPost("/api/settings", {
-        shopify: { storeDomain: window.EditProSettings?.storeDomain || "", accessToken: "" },
+        shopify: { storeDomain: getShopifyStoreDomain(), accessToken: "" },
         rules: window.EditProSettings?.rules,
         descriptionPhrases: window.EditProSettings?.descriptionPhrases,
-        roomDetection: {
-          ollamaHost: ollamaHostInput?.value.trim() || "http://localhost:11434",
-          ollamaModel: ollamaModelInput?.value.trim() || "gemma3:4b",
-        },
+        roomDetection,
       });
       window.EditProSettings = window.EditProSettings || {};
       window.EditProSettings.roomDetection = data.roomDetection;
-      EditProUtils.showMessage(messageEl, "Ollama settings saved.", "success");
+      if (data.shopify?.storeDomain) {
+        window.EditProSettings.storeDomain = data.shopify.storeDomain;
+      }
+      if (openAiKeyInput) {
+        openAiKeyInput.value = "";
+      }
+      applyOpenAiFields();
+      await refreshOpenAiStatus();
+      EditProUtils.showMessage(messageEl, "OpenAI settings saved.", "success");
     } catch (error) {
       EditProUtils.showMessage(messageEl, error.message, "error");
     } finally {
-      saveOllamaBtn.disabled = false;
-      saveOllamaBtn.textContent = "Save Ollama settings";
+      saveOpenAiBtn.disabled = false;
+      saveOpenAiBtn.textContent = "Save";
     }
   }
 
@@ -219,7 +271,9 @@
     if (q) {
       rows = rows.filter((r) => (r.resourceTitle || "").toLowerCase().includes(q));
     }
-    if (unmappedOnlyToggle?.checked) {
+    if (mapFilter === "mapped") {
+      rows = rows.filter((r) => r.mapped);
+    } else if (mapFilter === "unmapped") {
       rows = rows.filter((r) => !r.mapped);
     }
     const sort = sortSelect?.value || "title-asc";
@@ -237,39 +291,92 @@
     return rows;
   }
 
-  function renderTable() {
+  function getVisiblePage() {
+    const filtered = getFilteredRows();
+    const total = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    const page = Math.min(Math.max(1, currentPage), totalPages);
+    const start = (page - 1) * PAGE_SIZE;
+    return {
+      items: filtered.slice(start, start + PAGE_SIZE),
+      total,
+      page,
+      totalPages,
+    };
+  }
+
+  function updatePagination(total, page, totalPages) {
+    if (!paginationEl) {
+      return;
+    }
+    if (total === 0) {
+      paginationEl.hidden = true;
+      if (pageInfoEl) {
+        pageInfoEl.textContent = "";
+      }
+      if (prevBtn) {
+        prevBtn.disabled = true;
+      }
+      if (nextBtn) {
+        nextBtn.disabled = true;
+      }
+      return;
+    }
+    paginationEl.hidden = false;
+    if (pageInfoEl) {
+      pageInfoEl.textContent = `${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, total)} of ${total}`;
+    }
+    if (prevBtn) {
+      prevBtn.disabled = page <= 1;
+    }
+    if (nextBtn) {
+      nextBtn.disabled = page >= totalPages;
+    }
+  }
+
+  function renderRowHtml(row) {
+    const roomLabel = row.mapped ? EditProImageRoomMap.roomToTitleCase(row.room) : "—";
+    const statusClass = row.mapped ? "room-map-status--mapped" : "room-map-status--unmapped";
+    const statusText = row.mapped ? "Mapped" : "Unmapped";
+    return `<tr>
+      <td class="room-map-col-image">
+        <img class="room-map-thumb" src="${EditProUtils.escapeHtml(row.url)}" alt="" loading="lazy" />
+      </td>
+      <td class="room-map-col-resource">
+        <span class="room-map-resource-title">${EditProUtils.escapeHtml(row.resourceTitle)}</span>
+        <span class="room-map-type-badge">${EditProUtils.escapeHtml(resourceTypeLabel(row.resourceType))}</span>
+      </td>
+      <td class="room-map-col-index">${row.imageIndex}</td>
+      <td class="room-map-col-room">
+        ${row.mapped ? `<span class="room-map-room-badge">${EditProUtils.escapeHtml(roomLabel)}</span>` : `<span class="room-map-room-empty">Unmapped</span>`}
+      </td>
+      <td class="room-map-col-status"><span class="room-map-status ${statusClass}">${statusText}</span></td>
+    </tr>`;
+  }
+
+  function renderTableNow() {
     if (!tableBody) {
       return;
     }
-    const rows = getFilteredRows();
-    if (!rows.length) {
+    const { items, total, page, totalPages } = getVisiblePage();
+    currentPage = page;
+    updatePagination(total, page, totalPages);
+    if (!items.length) {
       tableBody.innerHTML =
         '<tr class="empty-row"><td colspan="5">No images match your filters.</td></tr>';
       return;
     }
-    tableBody.innerHTML = rows
-      .map((row) => {
-        const roomLabel = row.mapped
-          ? EditProImageRoomMap.roomToTitleCase(row.room)
-          : "—";
-        const statusClass = row.mapped ? "room-map-status--mapped" : "room-map-status--unmapped";
-        const statusText = row.mapped ? "Mapped" : "Unmapped";
-        return `<tr>
-          <td class="room-map-col-image">
-            <img class="room-map-thumb" src="${EditProUtils.escapeHtml(row.url)}" alt="" loading="lazy" />
-          </td>
-          <td class="room-map-col-resource">
-            <span class="room-map-resource-title">${EditProUtils.escapeHtml(row.resourceTitle)}</span>
-            <span class="room-map-type-badge">${EditProUtils.escapeHtml(resourceTypeLabel(row.resourceType))}</span>
-          </td>
-          <td class="room-map-col-index">${row.imageIndex}</td>
-          <td class="room-map-col-room">
-            ${row.mapped ? `<span class="room-map-room-badge">${EditProUtils.escapeHtml(roomLabel)}</span>` : `<span class="room-map-room-empty">Unmapped</span>`}
-          </td>
-          <td class="room-map-col-status"><span class="room-map-status ${statusClass}">${statusText}</span></td>
-        </tr>`;
-      })
-      .join("");
+    tableBody.innerHTML = items.map(renderRowHtml).join("");
+  }
+
+  function renderTableThrottled() {
+    if (renderTableTimer) {
+      return;
+    }
+    renderTableTimer = setTimeout(() => {
+      renderTableTimer = null;
+      renderTableNow();
+    }, 500);
   }
 
   function renderCoverage() {
@@ -277,7 +384,11 @@
       return;
     }
     if (coverageEl) {
-      coverageEl.textContent = `${summary.mapped} / ${summary.total} images mapped`;
+      const portraitNote =
+        summary.portraits > 0
+          ? ` · ${formatNumber(summary.portraits)} portrait${summary.portraits === 1 ? "" : "s"} auto`
+          : "";
+      coverageEl.textContent = `${formatNumber(summary.lifestyleMapped)} / ${formatNumber(summary.scannable)} lifestyle mapped${portraitNote}`;
     }
     if (statusBadge) {
       statusBadge.textContent = summary.complete ? "Complete" : "Incomplete";
@@ -285,19 +396,64 @@
         summary.complete ? "room-map-status-badge--complete" : "room-map-status-badge--incomplete"
       }`;
     }
-    if (mapBtn) {
-      const ollamaOk = ollamaStatus?.running;
-      mapBtn.disabled = scanning || !hasCatalog() || summary.unmapped === 0 || !ollamaOk;
-      mapBtn.textContent =
-        summary.unmapped > 0
-          ? `Map unmapped images (${summary.unmapped})`
-          : "All images mapped";
+    updateMapButton();
+  }
+
+  function syncSummaryFromMappings() {
+    summary = EditProImageRoomMap.getSummary(getStoreData());
+    renderCoverage();
+    renderTableThrottled();
+  }
+
+  function onScanStatusUpdate(status) {
+    jobActive = EditProImageRoomMap.isJobActive(status);
+    renderScanStatus(status);
+    syncSummaryFromMappings();
+    updateMapButton();
+
+    if (status.state === "done") {
+      jobActive = false;
+      EditProImageRoomMap.stopPolling();
+      const portraitNote =
+        status.portraits > 0 ? ` ${status.portraits} portrait${status.portraits === 1 ? "" : "s"} auto-mapped.` : "";
+      EditProUtils.showMessage(
+        messageEl,
+        `Mapped ${status.mapped} lifestyle image${status.mapped === 1 ? "" : "s"}. ${status.skipped || 0} already mapped.${portraitNote}`,
+        "success"
+      );
+      updateMapButton();
+    } else if (status.state === "error") {
+      jobActive = false;
+      EditProImageRoomMap.stopPolling();
+      EditProUtils.showMessage(messageEl, status.error || "Room mapping failed.", "error");
+      updateMapButton();
+    } else if (status.state === "stopped") {
+      jobActive = false;
+      EditProImageRoomMap.stopPolling();
+      EditProUtils.showMessage(messageEl, `Mapping stopped (${status.mapped} mapped).`, "warning");
+      updateMapButton();
+    }
+  }
+
+  async function resumePollingIfNeeded() {
+    try {
+      const status = await EditProImageRoomMap.getScanStatus();
+      if (EditProImageRoomMap.isJobActive(status)) {
+        jobActive = true;
+        renderScanStatus(status);
+        updateMapButton();
+        EditProImageRoomMap.startPolling(onScanStatusUpdate);
+      } else {
+        renderScanStatus(status);
+      }
+    } catch {
+      // ignore
     }
   }
 
   async function refresh() {
-    applyOllamaFields();
-    await refreshOllamaStatus();
+    applyOpenAiFields();
+    await refreshOpenAiStatus();
     const connected = window.EditProSettings?.connected;
     const catalog = hasCatalog();
 
@@ -340,76 +496,103 @@
       await EditProImageRoomMap.loadMappings();
       summary = EditProImageRoomMap.getSummary(getStoreData());
       renderCoverage();
-      renderTable();
+      renderTableNow();
+      await resumePollingIfNeeded();
     } catch (error) {
       EditProUtils.showMessage(messageEl, error.message, "error");
     }
   }
 
-  function setScanning(active, text) {
-    scanning = active;
-    if (scanOverlay) {
-      scanOverlay.hidden = !active;
-    }
-    if (scanProgressEl && text) {
-      scanProgressEl.textContent = text;
-    }
-    if (mapBtn) {
-      mapBtn.disabled = active || !summary || summary.unmapped === 0;
-    }
-  }
-
-  async function runScan() {
-    if (scanning || !hasCatalog()) {
+  async function startScan() {
+    if (jobActive) {
       return;
     }
-    const status = await refreshOllamaStatus();
-    if (!status?.running) {
-      EditProUtils.showMessage(messageEl, "Start Ollama before mapping images.", "warning");
+    const status = await refreshOpenAiStatus();
+    if (!status?.configured) {
+      EditProUtils.showMessage(messageEl, "Configure an OpenAI API key before mapping images.", "warning");
       return;
     }
     EditProUtils.hideMessage(messageEl);
-    setScanning(true, "Starting room detection…");
     try {
-      await saveOllamaSettings();
-      const result = await EditProImageRoomMap.scanUnmapped(getStoreData(), (progress) => {
-        if (scanProgressEl) {
-          scanProgressEl.textContent = `Mapping room ${progress.current} of ${progress.total}…`;
-        }
-      });
-      EditProUtils.showMessage(
-        messageEl,
-        `Mapped ${result.mapped} image${result.mapped === 1 ? "" : "s"}. ${result.skipped} already mapped.`,
-        "success"
-      );
-      await refresh();
+      await saveOpenAiSettings();
+      const result = await EditProImageRoomMap.startBackgroundScan();
+      jobActive = EditProImageRoomMap.isJobActive(result);
+      onScanStatusUpdate(result);
+      EditProImageRoomMap.startPolling(onScanStatusUpdate);
     } catch (error) {
       EditProUtils.showMessage(messageEl, error.message, "error");
-    } finally {
-      setScanning(false);
     }
   }
 
-  saveOllamaBtn?.addEventListener("click", saveOllamaSettings);
-  ollamaRefreshBtn?.addEventListener("click", refreshOllamaStatus);
-  ollamaStartBtn?.addEventListener("click", startOllamaService);
-  ollamaStopBtn?.addEventListener("click", stopOllamaService);
-  mapBtn?.addEventListener("click", runScan);
-  searchInput?.addEventListener("input", renderTable);
-  unmappedOnlyToggle?.addEventListener("change", renderTable);
-  sortSelect?.addEventListener("change", renderTable);
+  async function stopScan() {
+    try {
+      const result = await EditProImageRoomMap.stopBackgroundScan();
+      onScanStatusUpdate(result);
+      await EditProImageRoomMap.loadMappings();
+      syncSummaryFromMappings();
+    } catch (error) {
+      EditProUtils.showMessage(messageEl, error.message, "error");
+    }
+  }
+
+  async function handleMapClick() {
+    if (jobActive) {
+      await stopScan();
+    } else {
+      await startScan();
+    }
+  }
+
+  function resetPageAndRender() {
+    currentPage = 1;
+    renderTableNow();
+  }
+
+  function setMapFilter(nextFilter) {
+    mapFilter = nextFilter;
+    filterBar?.querySelectorAll("[data-map-filter]").forEach((chip) => {
+      chip.classList.toggle("active", chip.dataset.mapFilter === nextFilter);
+    });
+    resetPageAndRender();
+  }
+
+  filterBar?.addEventListener("click", (e) => {
+    const chip = e.target.closest("[data-map-filter]");
+    if (!chip) {
+      return;
+    }
+    setMapFilter(chip.dataset.mapFilter || "all");
+  });
+
+  prevBtn?.addEventListener("click", () => {
+    if (currentPage > 1) {
+      currentPage -= 1;
+      renderTableNow();
+    }
+  });
+
+  nextBtn?.addEventListener("click", () => {
+    const { totalPages } = getVisiblePage();
+    if (currentPage < totalPages) {
+      currentPage += 1;
+      renderTableNow();
+    }
+  });
+
+  saveOpenAiBtn?.addEventListener("click", saveOpenAiSettings);
+  mapBtn?.addEventListener("click", handleMapClick);
+  searchInput?.addEventListener("input", resetPageAndRender);
+  sortSelect?.addEventListener("change", resetPageAndRender);
 
   document.addEventListener("editpro:catalog-updated", refresh);
   document.addEventListener("editpro:settings-loaded", refresh);
   document.addEventListener("editpro:module-changed", (e) => {
     if (e.detail?.moduleId === "roommap") {
       refresh();
-      startOllamaPolling();
     } else {
-      stopOllamaPolling();
+      EditProImageRoomMap.stopPolling();
     }
   });
-
-  startOllamaPolling();
-  refresh();
 })();
+
+

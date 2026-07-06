@@ -24,6 +24,26 @@
     );
   }
 
+  function applyShopName(shopName) {
+    if (!shopName || !window.EditProSettings) {
+      return;
+    }
+    window.EditProSettings.shopName = shopName;
+    document.dispatchEvent(
+      new CustomEvent("editpro:shop-name-updated", { detail: { shopName } })
+    );
+  }
+
+  async function refreshShopNameFromShopify() {
+    try {
+      const shopName = await EditProShopify.refreshShopName();
+      applyShopName(shopName);
+      return shopName;
+    } catch {
+      return window.EditProSettings?.shopName || "";
+    }
+  }
+
   function getStoreDisplayName() {
     const settings = window.EditProSettings || {};
     if (settings.shopName) {
@@ -450,6 +470,8 @@
       return;
     }
 
+    await refreshShopNameFromShopify();
+
     if (syncState === "fetching") {
       return;
     }
@@ -700,6 +722,7 @@
       ensureCatalogLoaded();
     }
   });
+  document.addEventListener("editpro:shop-name-updated", () => updateStoreHeader());
   document.addEventListener("editpro:settings-saved", onSettingsUpdate);
   document.addEventListener("editpro:catalog-updated", updateApplyButton);
   document.addEventListener("editpro:module-changed", (e) => {

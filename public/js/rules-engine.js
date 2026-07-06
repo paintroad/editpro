@@ -1,23 +1,239 @@
 window.EditProRules = {
-  ROOM_FALLBACKS: [
+  DEFAULT_ROOM_FALLBACKS: [
     "house",
     "home",
     "space",
     "place",
     "area",
     "abode",
-    "sweet home",
-    "lovely house",
+    "sweet-home",
+    "lovely-house",
     "room",
+    "interior",
+    "decor",
+    "living-space",
+    "bedroom",
+    "kitchen",
+    "office",
+    "hallway",
+    "studio",
+    "gallery",
+    "nook",
+    "retreat",
+    "haven",
+    "dwelling",
+    "residence",
+    "loft",
+    "sanctuary",
   ],
 
-  resolveRoom(fileId, seedKey, roomFallbackCache = {}) {
-    const mapped = window.EditProImageRoomMap?.getRoom?.(fileId);
-    if (mapped) {
+  CHANGE_FIELD_KEYS: {
+    seoTitle: "SEO title",
+    seoDescription: "SEO description",
+    tags: "Tags",
+    imageAlt: "Image alt text",
+    imageFilename: "Image filename",
+  },
+
+  changeFieldKey(change) {
+    const name = String(change?.field || "");
+    if (name === "SEO title") {
+      return "seoTitle";
+    }
+    if (name === "SEO description") {
+      return "seoDescription";
+    }
+    if (name === "Tags") {
+      return "tags";
+    }
+    if (/alt/i.test(name)) {
+      return "imageAlt";
+    }
+    if (/filename/i.test(name)) {
+      return "imageFilename";
+    }
+    return null;
+  },
+
+  getRoomFallbacks() {
+    const list = window.EditProSettings?.roomFallbacks;
+    return Array.isArray(list) && list.length ? list : this.DEFAULT_ROOM_FALLBACKS;
+  },
+
+  hashSeedKey(seedKey) {
+    let hash = 0;
+    const str = String(seedKey);
+    for (let i = 0; i < str.length; i++) {
+      hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
+    }
+    return hash;
+  },
+
+  templateUsesRoom(template) {
+    return /\{\{\s*room\s*\}\}/.test(String(template || ""));
+  },
+
+  collectStoreFilenames(storeData) {
+    const used = new Set();
+    const add = (url) => {
+      const name = EditProUtils.filenameFromUrl(url);
+      if (name) {
+        used.add(name.toLowerCase());
+      }
+    };
+    for (const product of storeData?.products || []) {
+      for (const node of product.media?.nodes || []) {
+        add(node?.image?.url);
+      }
+    }
+    for (const collection of storeData?.collections || []) {
+      add(collection.image?.url);
+    }
+    for (const article of storeData?.articles || []) {
+      add(article.image?.url);
+    }
+    return used;
+  },
+
+  appendSuffixBeforeExt(filename, suffix, currentFilename) {
+    if (!filename || !suffix) {
+      return filename;
+    }
+    const ext =
+      currentFilename && currentFilename.includes(".")
+        ? currentFilename.slice(currentFilename.lastIndexOf("."))
+        : "";
+    let base = filename;
+    if (ext && base.toLowerCase().endsWith(ext.toLowerCase())) {
+      base = base.slice(0, -ext.length);
+    }
+    return this.ensureExtension(`${base}-${suffix}`, currentFilename).toLowerCase();
+  },
+
+  isFilenameCollision(filename, usedFilenames, currentFilename) {
+    const key = (filename || "").toLowerCase();
+    if (!key) {
+      return false;
+    }
+    const ownName = (currentFilename || "").toLowerCase();
+    if (key === ownName) {
+      return false;
+    }
+    return usedFilenames.has(key);
+  },
+
+  reserveFilename(filename, usedFilenames) {
+    const key = (filename || "").toLowerCase();
+    if (key) {
+      usedFilenames.add(key);
+    }
+  },
+
+  buildFilenameCandidates({
+    template,
+    buildContext,
+    seedKey,
+    currentFilename,
+  }) {
+    if (!template) {
+      return [];
+    }
+    const fallbacks = this.getRoomFallbacks();
+    const usesRoom = this.templateUsesRoom(template);
+
+    const buildFilename = (roomOverride, suffixFallback) => {
+      let ctx = buildContext();
+      if (roomOverride != null) {
+        ctx = { ...ctx, room: roomOverride };
+      }
+      let raw = this.applyTemplate(template, ctx);
+      let filename = this.sanitizeFilename(raw, currentFilename);
+      if (!usesRoom && suffixFallback) {
+        const sanitized = this.sanitizeField(suffixFallback);
+        if (sanitized) {
+          filename = this.appendSuffixBeforeExt(filename, sanitized, currentFilename);
+        }
+      }
+      return filename;
+    };
+
+    const candidates = [];
+    const seen = new Set();
+    const addCandidate = (name) => {
+      const key = (name || "").toLowerCase();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        candidates.push(name);
+      }
+    };
+
+    addCandidate(buildFilename(null, null));
+    const start = fallbacks.length ? this.hashSeedKey(seedKey) % fallbacks.length : 0;
+    for (let i = 0; i < fallbacks.length; i++) {
+      const fallback = fallbacks[(start + i) % fallbacks.length];
+      addCandidate(usesRoom ? buildFilename(fallback, null) : buildFilename(null, fallback));
+    }
+    return candidates;
+  },
+
+  filenameChangeMeta({ template, buildContext, seedKey, currentFilename }) {
+    return {
+      filenameSeedKey: seedKey,
+      filenameTemplate: template,
+      filenameBuildContext: buildContext,
+      filenameCurrent: currentFilename || "",
+    };
+  },
+
+  resolveUniqueImageFilename({
+    template,
+    buildContext,
+    seedKey,
+    usedFilenames,
+    currentFilename,
+    reserve = true,
+  }) {
+    if (!template) {
+      return "";
+    }
+    const candidates = this.buildFilenameCandidates({
+      template,
+      buildContext,
+      seedKey,
+      currentFilename,
+    });
+
+    for (const filename of candidates) {
+      if (!this.isFilenameCollision(filename, usedFilenames, currentFilename)) {
+        if (reserve) {
+          this.reserveFilename(filename, usedFilenames);
+        }
+        return filename;
+      }
+    }
+
+    const last = candidates[candidates.length - 1] || "";
+    if (reserve && last) {
+      this.reserveFilename(last, usedFilenames);
+    }
+    return last;
+  },
+
+  resolveRoom(fileId, seedKey, roomFallbackCache = {}, resource = null, resourceType = null, imageIndex = 1) {
+    let mapped = "";
+    if (resource && resourceType && window.EditProImageRoomMap?.getRoomForResource) {
+      mapped = window.EditProImageRoomMap.getRoomForResource(resource, resourceType, imageIndex);
+    }
+    if (!mapped) {
+      mapped = window.EditProImageRoomMap?.getRoom?.(fileId) || "";
+    }
+    if (mapped && !EditProImageRoomMap.isNoneRoom(mapped)) {
       return mapped;
     }
     if (!roomFallbackCache[seedKey]) {
-      roomFallbackCache[seedKey] = this.pickRandom(this.ROOM_FALLBACKS);
+      const fallbacks = this.getRoomFallbacks();
+      const idx = fallbacks.length ? this.hashSeedKey(seedKey) % fallbacks.length : 0;
+      roomFallbackCache[seedKey] = fallbacks[idx] || "";
     }
     return roomFallbackCache[seedKey];
   },
@@ -47,9 +263,11 @@ window.EditProRules = {
 
     if (resourceType === "product") {
       const rooms = new Set();
-      for (const img of resource.media?.nodes || []) {
-        const mappedRoom = window.EditProImageRoomMap?.getRoom?.(img.id);
-        if (mappedRoom) {
+      const nodeCount = resource.media?.nodes?.length || 0;
+      for (let i = 0; i < nodeCount; i++) {
+        const img = window.EditProImageRoomMap?.imageFromResource?.(resource, "product", i + 1);
+        const mappedRoom = img ? window.EditProImageRoomMap.getRoomForImage(img) : "";
+        if (mappedRoom && !EditProImageRoomMap.isNoneRoom(mappedRoom)) {
           rooms.add(window.EditProImageRoomMap.roomToTitleCase(mappedRoom));
         }
       }
@@ -128,7 +346,7 @@ window.EditProRules = {
     const productType = product.productType || "";
     const fileId = image?.id || product.media?.nodes?.[0]?.id || "";
     const idx = imageIndex > 0 ? imageIndex : 1;
-    const room = this.resolveRoom(fileId, `${product.id}:${idx}`, roomFallbackCache);
+    const room = this.resolveRoom(fileId, `${product.id}:${idx}`, roomFallbackCache, product, "product", idx);
     return {
       title,
       handle: product.handle || "",
@@ -136,6 +354,7 @@ window.EditProRules = {
       shopName: shopName || "",
       ...this.tagTokens(product.tags),
       description,
+      description100: EditProUtils.truncate(description, 100),
       description160: EditProUtils.truncate(description, 160),
       product_name: title,
       product_type: productType,
@@ -152,12 +371,13 @@ window.EditProRules = {
     const description = EditProUtils.stripHtml(collection.descriptionHtml);
     const title = collection.title || "";
     const fileId = collection.image?.id || "";
-    const room = this.resolveRoom(fileId, `${collection.id}:1`, roomFallbackCache);
+    const room = this.resolveRoom(fileId, `${collection.id}:1`, roomFallbackCache, collection, "collection", 1);
     return {
       title,
       handle: collection.handle || "",
       collection_name: title,
       description,
+      description100: EditProUtils.truncate(description, 100),
       description160: EditProUtils.truncate(description, 160),
       shopName: shopName || "",
       shop_name: shopName || "",
@@ -172,7 +392,7 @@ window.EditProRules = {
     const description = EditProUtils.stripHtml(article.summary);
     const title = article.title || "";
     const fileId = article.image?.id || "";
-    const room = this.resolveRoom(fileId, `${article.id}:1`, roomFallbackCache);
+    const room = this.resolveRoom(fileId, `${article.id}:1`, roomFallbackCache, article, "article", 1);
     return {
       title,
       handle: article.handle || "",
@@ -180,6 +400,7 @@ window.EditProRules = {
       blog_title: article.blog?.title || "",
       ...this.tagTokens(article.tags),
       description,
+      description100: EditProUtils.truncate(description, 100),
       description160: EditProUtils.truncate(description, 160),
       shopName: shopName || "",
       shop_name: shopName || "",
@@ -243,8 +464,288 @@ window.EditProRules = {
     return `${change.resourceId}|${change.field}|${change.mutation}`;
   },
 
+  getRulesForType(resourceType) {
+    const key =
+      resourceType === "product"
+        ? "product"
+        : resourceType === "collection"
+          ? "collection"
+          : "article";
+    return window.EditProSettings?.rules?.[key] || null;
+  },
+
+  buildRuleContext(resourceType, resource, shopName) {
+    const roomFallbackCache = {};
+    if (resourceType === "product") {
+      return this.productContext(resource, shopName, null, 0, roomFallbackCache);
+    }
+    if (resourceType === "collection") {
+      return this.collectionContext(resource, shopName, roomFallbackCache);
+    }
+    return this.articleContext(resource, shopName, roomFallbackCache);
+  },
+
+  expectedSeoTitle(resourceType, resource, shopName, rules) {
+    const template = rules?.seoTitle;
+    if (!template || this.templateHasRandomTokens(template)) {
+      return null;
+    }
+    const ctx = this.buildRuleContext(resourceType, resource, shopName);
+    return this.applyTemplate(template, ctx);
+  },
+
+  expectedSeoDescription(resourceType, resource, shopName, rules) {
+    const template = rules?.seoDescription;
+    if (!template || this.templateHasRandomTokens(template)) {
+      return null;
+    }
+    const ctx = this.buildRuleContext(resourceType, resource, shopName);
+    return this.applyTemplate(template, ctx);
+  },
+
+  buildImageFilenameContext(resourceType, resource, image, imageIndex, shopName, roomFallbackCache = {}) {
+    if (resourceType === "product") {
+      return this.productContext(resource, shopName, image, imageIndex, roomFallbackCache);
+    }
+    if (resourceType === "collection") {
+      return this.collectionContext(resource, shopName, roomFallbackCache);
+    }
+    return this.articleContext(resource, shopName, roomFallbackCache);
+  },
+
+  expectedFilenameForImage(
+    resourceType,
+    resource,
+    image,
+    imageIndex,
+    rules,
+    shopName,
+    usedFilenames,
+    reserve = true
+  ) {
+    if (!rules?.imageFilename) {
+      return null;
+    }
+    if (this.templateHasRandomTokens(rules.imageFilename)) {
+      return null;
+    }
+    const url = image?.image?.url || image?.url;
+    if (!url) {
+      return null;
+    }
+    const currentFilename = EditProUtils.filenameFromUrl(url);
+    const roomFallbackCache = {};
+    const seedKey =
+      resourceType === "product"
+        ? `${resource.id}:${imageIndex}`
+        : `${resource.id}:1`;
+    const registry = usedFilenames || new Set();
+    const filename = this.resolveUniqueImageFilename({
+      template: rules.imageFilename,
+      buildContext: () =>
+        this.buildImageFilenameContext(
+          resourceType,
+          resource,
+          image,
+          imageIndex,
+          shopName,
+          roomFallbackCache
+        ),
+      seedKey,
+      usedFilenames: registry,
+      currentFilename,
+      reserve,
+    });
+    return filename || null;
+  },
+
+  imageFilenameMatchesRule(
+    resourceType,
+    resource,
+    image,
+    imageIndex,
+    rules,
+    shopName,
+    usedFilenames,
+    reserve = false
+  ) {
+    const expected = this.expectedFilenameForImage(
+      resourceType,
+      resource,
+      image,
+      imageIndex,
+      rules,
+      shopName,
+      usedFilenames,
+      reserve
+    );
+    if (!expected) {
+      return true;
+    }
+    const url = image?.image?.url || image?.url;
+    const current = (EditProUtils.filenameFromUrl(url) || "").toLowerCase();
+    return current === expected.toLowerCase();
+  },
+
+  VOLATILE_FILENAME_TOKEN:
+    /\{\{\s*(room|image\.index|incrementing_number|random_tag|random_description)\s*\}\}/,
+
+  filenamePrefixTemplate(template) {
+    const value = String(template || "");
+    const match = value.match(this.VOLATILE_FILENAME_TOKEN);
+    if (!match || match.index == null) {
+      return value;
+    }
+    return value.slice(0, match.index);
+  },
+
+  buildFilenamePrefix(prefixTemplate, ctx) {
+    if (!prefixTemplate) {
+      return "";
+    }
+    const raw = this.applyTemplate(prefixTemplate, ctx);
+    let prefix = this.sanitizeField(raw);
+    const trimmedTemplate = String(prefixTemplate).trimEnd();
+    if (trimmedTemplate.endsWith("-") && prefix && !prefix.endsWith("-")) {
+      prefix += "-";
+    }
+    return prefix.toLowerCase();
+  },
+
+  filenameBasename(filename) {
+    const name = String(filename || "");
+    if (!name) {
+      return "";
+    }
+    const dot = name.lastIndexOf(".");
+    return (dot > 0 ? name.slice(0, dot) : name).toLowerCase();
+  },
+
+  imageFilenameMatchesPrefix(resourceType, resource, image, imageIndex, rules, shopName) {
+    if (!rules?.imageFilename || this.templateHasRandomTokens(rules.imageFilename)) {
+      return true;
+    }
+    const prefixTemplate = this.filenamePrefixTemplate(rules.imageFilename);
+    if (!prefixTemplate) {
+      return true;
+    }
+    const url = image?.image?.url || image?.url;
+    if (!url) {
+      return true;
+    }
+    const ctx = this.buildImageFilenameContext(
+      resourceType,
+      resource,
+      image,
+      imageIndex,
+      shopName,
+      {}
+    );
+    const prefix = this.buildFilenamePrefix(prefixTemplate, ctx);
+    if (!prefix) {
+      return true;
+    }
+    const current = this.filenameBasename(EditProUtils.filenameFromUrl(url));
+    return current.startsWith(prefix);
+  },
+
+  resourceHasFilenamePrefixMismatch(resourceType, resource, shopName) {
+    const rules = this.getRulesForType(resourceType);
+    if (!rules?.imageFilename) {
+      return false;
+    }
+
+    if (resourceType === "product") {
+      const images = resource.media?.nodes || [];
+      if (!images.length) {
+        return false;
+      }
+      for (let i = 0; i < images.length; i++) {
+        const image = images[i];
+        if (!image?.id) {
+          continue;
+        }
+        if (
+          !this.imageFilenameMatchesPrefix(
+            "product",
+            resource,
+            image,
+            i + 1,
+            rules,
+            shopName
+          )
+        ) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    const img = resource.image;
+    if (!img?.url && !img?.id) {
+      return false;
+    }
+    const type = resourceType === "collection" ? "collection" : "article";
+    return !this.imageFilenameMatchesPrefix(type, resource, img, 1, rules, shopName);
+  },
+
+  resourceHasFilenameFormatMismatch(resourceType, resource, shopName, usedFilenames) {
+    const rules = this.getRulesForType(resourceType);
+    if (!rules?.imageFilename) {
+      return false;
+    }
+
+    if (resourceType === "product") {
+      const images = resource.media?.nodes || [];
+      if (!images.length) {
+        return false;
+      }
+      for (let i = 0; i < images.length; i++) {
+        const image = images[i];
+        if (!image?.id) {
+          continue;
+        }
+        if (
+          !this.imageFilenameMatchesRule(
+            "product",
+            resource,
+            image,
+            i + 1,
+            rules,
+            shopName,
+            usedFilenames,
+            false
+          )
+        ) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    const img = resource.image;
+    if (!img?.url && !img?.id) {
+      return false;
+    }
+    const type = resourceType === "collection" ? "collection" : "article";
+    return !this.imageFilenameMatchesRule(
+      type,
+      resource,
+      img,
+      1,
+      rules,
+      shopName,
+      usedFilenames,
+      false
+    );
+  },
+
   annotateChange(change, fileUsageIndex) {
-    const annotated = { ...change, changeId: this.makeChangeId(change) };
+    const annotated = {
+      ...change,
+      changeId: this.makeChangeId(change),
+      fieldKey: change.fieldKey || this.changeFieldKey(change),
+    };
     if (change.mutation === "fileUpdate" && change.fileInput?.id) {
       annotated.fileId = change.fileInput.id;
       annotated.fileUsage = EditProFileUsage.getUsage(fileUsageIndex, change.fileInput.id);
@@ -252,10 +753,11 @@ window.EditProRules = {
     return annotated;
   },
 
-  buildProductChanges(product, rules, shopName, descriptionPhrases) {
+  buildProductChanges(product, rules, shopName, descriptionPhrases, usedFilenames = null) {
     const changes = [];
     const phrases = descriptionPhrases ?? window.EditProSettings?.descriptionPhrases;
     const roomFallbackCache = {};
+    const filenameRegistry = usedFilenames || new Set();
     const random = this.randomContext("product", product, phrases);
     const base = this.mergeContext(
       this.productContext(product, shopName, null, 0, roomFallbackCache),
@@ -276,7 +778,7 @@ window.EditProRules = {
         current: product.seo?.title || "",
         proposed: seoTitle,
         mutation: "productUpdate",
-        input: { id: product.id, seo: { title: seoTitle, description: product.seo?.description || "" } },
+        input: { id: product.id, seo: { title: seoTitle } },
       });
     }
 
@@ -289,7 +791,7 @@ window.EditProRules = {
         current: product.seo?.description || "",
         proposed: seoDescription,
         mutation: "productUpdate",
-        input: { id: product.id, seo: { title: product.seo?.title || seoTitle, description: seoDescription } },
+        input: { id: product.id, seo: { description: seoDescription } },
       });
     }
 
@@ -317,11 +819,15 @@ window.EditProRules = {
         this.productContext(product, shopName, image, index + 1, roomFallbackCache),
         random
       );
+
       const alt = this.applyTemplate(rules.imageAlt, ctx);
-      const filename = this.sanitizeFilename(
-        this.applyTemplate(rules.imageFilename, ctx),
-        currentFilename
-      );
+      const filename = this.resolveUniqueImageFilename({
+        template: rules.imageFilename,
+        buildContext: () => ctx,
+        seedKey: `${product.id}:${index + 1}`,
+        usedFilenames: filenameRegistry,
+        currentFilename,
+      });
 
       if ((image.alt || "") !== alt) {
         changes.push({
@@ -337,6 +843,7 @@ window.EditProRules = {
       }
 
       if (filename && (currentFilename || "") !== filename) {
+        const seedKey = `${product.id}:${index + 1}`;
         changes.push({
           resourceType: "product",
           resourceId: product.id,
@@ -346,6 +853,12 @@ window.EditProRules = {
           proposed: filename,
           mutation: "fileUpdate",
           fileInput: { id: fileId, filename },
+          ...this.filenameChangeMeta({
+            template: rules.imageFilename,
+            buildContext: () => ctx,
+            seedKey,
+            currentFilename,
+          }),
         });
       }
     });
@@ -353,10 +866,11 @@ window.EditProRules = {
     return changes;
   },
 
-  buildCollectionChanges(collection, rules, shopName, descriptionPhrases) {
+  buildCollectionChanges(collection, rules, shopName, descriptionPhrases, usedFilenames = null) {
     const changes = [];
     const phrases = descriptionPhrases ?? window.EditProSettings?.descriptionPhrases;
     const roomFallbackCache = {};
+    const filenameRegistry = usedFilenames || new Set();
     const random = this.randomContext("collection", collection, phrases);
     const ctx = this.mergeContext(
       this.collectionContext(collection, shopName, roomFallbackCache),
@@ -374,7 +888,7 @@ window.EditProRules = {
         current: collection.seo?.title || "",
         proposed: seoTitle,
         mutation: "collectionUpdate",
-        input: { id: collection.id, seo: { title: seoTitle, description: collection.seo?.description || "" } },
+        input: { id: collection.id, seo: { title: seoTitle } },
       });
     }
 
@@ -387,7 +901,7 @@ window.EditProRules = {
         current: collection.seo?.description || "",
         proposed: seoDescription,
         mutation: "collectionUpdate",
-        input: { id: collection.id, seo: { title: collection.seo?.title || seoTitle, description: seoDescription } },
+        input: { id: collection.id, seo: { description: seoDescription } },
       });
     }
 
@@ -395,10 +909,13 @@ window.EditProRules = {
     if (fileId) {
       const currentFilename = EditProUtils.filenameFromUrl(collection.image?.url);
       const alt = this.applyTemplate(rules.imageAlt, ctx);
-      const filename = this.sanitizeFilename(
-        this.applyTemplate(rules.imageFilename, ctx),
-        currentFilename
-      );
+      const filename = this.resolveUniqueImageFilename({
+        template: rules.imageFilename,
+        buildContext: () => ctx,
+        seedKey: `${collection.id}:1`,
+        usedFilenames: filenameRegistry,
+        currentFilename,
+      });
 
       if ((collection.image.alt || "") !== alt) {
         changes.push({
@@ -414,6 +931,7 @@ window.EditProRules = {
       }
 
       if (filename && (currentFilename || "") !== filename) {
+        const seedKey = `${collection.id}:1`;
         changes.push({
           resourceType: "collection",
           resourceId: collection.id,
@@ -423,6 +941,12 @@ window.EditProRules = {
           proposed: filename,
           mutation: "fileUpdate",
           fileInput: { id: fileId, filename },
+          ...this.filenameChangeMeta({
+            template: rules.imageFilename,
+            buildContext: () => ctx,
+            seedKey,
+            currentFilename,
+          }),
         });
       }
     }
@@ -430,10 +954,11 @@ window.EditProRules = {
     return changes;
   },
 
-  buildArticleChanges(article, rules, shopName, descriptionPhrases) {
+  buildArticleChanges(article, rules, shopName, descriptionPhrases, usedFilenames = null) {
     const changes = [];
     const phrases = descriptionPhrases ?? window.EditProSettings?.descriptionPhrases;
     const roomFallbackCache = {};
+    const filenameRegistry = usedFilenames || new Set();
     const random = this.randomContext("article", article, phrases);
     const ctx = this.mergeContext(
       this.articleContext(article, shopName, roomFallbackCache),
@@ -502,10 +1027,13 @@ window.EditProRules = {
     if (fileId) {
       const currentFilename = EditProUtils.filenameFromUrl(article.image?.url);
       const alt = this.applyTemplate(rules.imageAlt, ctx);
-      const filename = this.sanitizeFilename(
-        this.applyTemplate(rules.imageFilename, ctx),
-        currentFilename
-      );
+      const filename = this.resolveUniqueImageFilename({
+        template: rules.imageFilename,
+        buildContext: () => ctx,
+        seedKey: `${article.id}:1`,
+        usedFilenames: filenameRegistry,
+        currentFilename,
+      });
 
       if ((article.image.alt || "") !== alt) {
         changes.push({
@@ -521,6 +1049,7 @@ window.EditProRules = {
       }
 
       if (filename && (currentFilename || "") !== filename) {
+        const seedKey = `${article.id}:1`;
         changes.push({
           resourceType: "article",
           resourceId: article.id,
@@ -530,6 +1059,12 @@ window.EditProRules = {
           proposed: filename,
           mutation: "fileUpdate",
           fileInput: { id: fileId, filename },
+          ...this.filenameChangeMeta({
+            template: rules.imageFilename,
+            buildContext: () => ctx,
+            seedKey,
+            currentFilename,
+          }),
         });
       }
     }
@@ -623,13 +1158,20 @@ window.EditProRules = {
     const collectionIds = selection.collectionIds;
     const articleIds = selection.articleIds;
     const descriptionPhrases = window.EditProSettings?.descriptionPhrases;
+    const usedFilenames = this.collectStoreFilenames(storeData);
 
     for (const product of storeData.products || []) {
       if (productIds && !productIds.has(product.id)) {
         continue;
       }
       changes.push(
-        ...this.buildProductChanges(product, rules.product, shopName, descriptionPhrases)
+        ...this.buildProductChanges(
+          product,
+          rules.product,
+          shopName,
+          descriptionPhrases,
+          usedFilenames
+        )
       );
     }
     for (const collection of storeData.collections || []) {
@@ -637,7 +1179,13 @@ window.EditProRules = {
         continue;
       }
       changes.push(
-        ...this.buildCollectionChanges(collection, rules.collection, shopName, descriptionPhrases)
+        ...this.buildCollectionChanges(
+          collection,
+          rules.collection,
+          shopName,
+          descriptionPhrases,
+          usedFilenames
+        )
       );
     }
     for (const article of storeData.articles || []) {
@@ -645,7 +1193,13 @@ window.EditProRules = {
         continue;
       }
       changes.push(
-        ...this.buildArticleChanges(article, rules.article, shopName, descriptionPhrases)
+        ...this.buildArticleChanges(
+          article,
+          rules.article,
+          shopName,
+          descriptionPhrases,
+          usedFilenames
+        )
       );
     }
     return changes.map((c) => this.annotateChange(c, fileUsageIndex));

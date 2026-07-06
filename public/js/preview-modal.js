@@ -1,19 +1,26 @@
 window.EditProPreviewModal = {
+  FIELD_KEY_ORDER: ["seoTitle", "seoDescription", "tags", "imageAlt", "imageFilename"],
+
   init() {
     this.modal = document.getElementById("previewModal");
     this.body = document.getElementById("previewModalBody");
     this.titleEl = document.getElementById("previewModalTitle");
     this.countEl = document.getElementById("previewModalCount");
     this.complianceSummaryEl = document.getElementById("previewComplianceSummary");
+    this.fieldFiltersEl = document.getElementById("previewFieldFilters");
     this.actionBtn = document.getElementById("previewModalActionBtn");
     this.progressWrap = document.getElementById("previewModalProgress");
     this.progressBar = document.getElementById("previewModalProgressBar");
     this.messageEl = document.getElementById("previewModalMessage");
     this.viewErrorsBtn = document.getElementById("previewModalViewErrorsBtn");
     this.errorListEl = document.getElementById("previewModalErrorList");
+    this.selectAllBtn = document.getElementById("previewSelectAllBtn");
+    this.clearBtn = document.getElementById("previewClearBtn");
 
     this.changes = [];
     this.selectedIds = new Set();
+    this.enabledFieldKeys = new Set();
+    this.allFieldKeys = [];
     this.mode = "sync";
     this.onComplete = null;
     this.logEntryId = null;
@@ -25,12 +32,24 @@ window.EditProPreviewModal = {
     this.actionBtn?.addEventListener("click", () => this.runAction());
     this.viewErrorsBtn?.addEventListener("click", () => this.toggleErrorList());
 
+    this.fieldFiltersEl?.addEventListener("change", (e) => {
+      const cb = e.target.closest("[data-preview-field-key]");
+      if (!cb) {
+        return;
+      }
+      this.setFieldKeyEnabled(cb.dataset.previewFieldKey, cb.checked);
+    });
+
     document.getElementById("previewSelectAllBtn")?.addEventListener("click", () => {
-      this.selectedIds = new Set(this.changes.map((c) => c.changeId));
+      for (const change of this.getVisibleChanges()) {
+        this.selectedIds.add(change.changeId);
+      }
       this.render();
     });
     document.getElementById("previewClearBtn")?.addEventListener("click", () => {
-      this.selectedIds = new Set();
+      for (const change of this.getVisibleChanges()) {
+        this.selectedIds.delete(change.changeId);
+      }
       this.render();
     });
 
@@ -48,6 +67,73 @@ window.EditProPreviewModal = {
       this.updateCount();
       this.renderComplianceSummary();
     });
+  },
+
+  ensureChangeFieldKeys() {
+    for (const change of this.changes) {
+      if (!change.fieldKey) {
+        change.fieldKey = EditProRules.changeFieldKey(change);
+      }
+    }
+  },
+
+  collectFieldKeys() {
+    const present = new Set();
+    for (const change of this.changes) {
+      if (change.fieldKey) {
+        present.add(change.fieldKey);
+      }
+    }
+    return this.FIELD_KEY_ORDER.filter((key) => present.has(key));
+  },
+
+  fieldKeyLabel(key) {
+    return EditProRules.CHANGE_FIELD_KEYS?.[key] || key;
+  },
+
+  getVisibleChanges() {
+    if (this.mode !== "sync") {
+      return this.changes;
+    }
+    return this.changes.filter((change) => change.fieldKey && this.enabledFieldKeys.has(change.fieldKey));
+  },
+
+  setFieldKeyEnabled(fieldKey, enabled) {
+    const matching = this.changes.filter((change) => change.fieldKey === fieldKey);
+    if (enabled) {
+      this.enabledFieldKeys.add(fieldKey);
+      for (const change of matching) {
+        this.selectedIds.add(change.changeId);
+      }
+    } else {
+      this.enabledFieldKeys.delete(fieldKey);
+      for (const change of matching) {
+        this.selectedIds.delete(change.changeId);
+      }
+    }
+    this.render();
+  },
+
+  renderFieldFilters() {
+    if (!this.fieldFiltersEl) {
+      return;
+    }
+    const showFilters = this.mode === "sync" && this.allFieldKeys.length > 0;
+    this.fieldFiltersEl.hidden = !showFilters;
+    if (!showFilters) {
+      this.fieldFiltersEl.innerHTML = "";
+      return;
+    }
+    this.fieldFiltersEl.innerHTML = this.allFieldKeys
+      .map((key) => {
+        const checked = this.enabledFieldKeys.has(key);
+        const label = EditProUtils.escapeHtml(this.fieldKeyLabel(key));
+        return `<label class="preview-field-filter">
+          <input type="checkbox" data-preview-field-key="${EditProUtils.escapeHtml(key)}" ${checked ? "checked" : ""} />
+          ${label}
+        </label>`;
+      })
+      .join("");
   },
 
   clearSyncErrors() {
@@ -79,14 +165,14 @@ window.EditProPreviewModal = {
 
   showSyncErrors(errors) {
     this.lastSyncErrors = errors;
-    this.errorsExpanded = false;
+    this.errorsExpanded = errors.length > 0;
     this.renderErrorList();
     if (this.viewErrorsBtn) {
       this.viewErrorsBtn.hidden = errors.length === 0;
-      this.viewErrorsBtn.textContent = "View errors";
+      this.viewErrorsBtn.textContent = this.errorsExpanded ? "Hide errors" : "View errors";
     }
     if (this.errorListEl) {
-      this.errorListEl.hidden = true;
+      this.errorListEl.hidden = !this.errorsExpanded;
     }
   },
 
@@ -129,6 +215,9 @@ window.EditProPreviewModal = {
     this.logEntryId = logEntryId;
     this.onComplete = onComplete;
     this.changes = changes.map((c) => ({ ...c }));
+    this.ensureChangeFieldKeys();
+    this.allFieldKeys = this.collectFieldKeys();
+    this.enabledFieldKeys = new Set(this.allFieldKeys);
     this.selectedIds = new Set(this.changes.map((c) => c.changeId));
     this.annotateCompliance();
     this.titleEl.textContent = title;
@@ -164,7 +253,7 @@ window.EditProPreviewModal = {
   },
 
   getSelectedChanges() {
-    return this.changes.filter((c) => this.selectedIds.has(c.changeId));
+    return this.getVisibleChanges().filter((change) => this.selectedIds.has(change.changeId));
   },
 
   renderComplianceCell(change) {
@@ -282,29 +371,41 @@ window.EditProPreviewModal = {
   },
 
   render() {
+    const visibleChanges = this.getVisibleChanges();
     const colSpan = this.mode === "view" ? 8 : 9;
-    if (this.changes.length === 0) {
-      this.body.innerHTML = `<tr class="empty-row"><td colspan="${colSpan}">No changes to preview.</td></tr>`;
+    this.renderFieldFilters();
+    if (visibleChanges.length === 0) {
+      const message =
+        this.changes.length === 0
+          ? "No changes to preview."
+          : "No changes match the selected fields.";
+      this.body.innerHTML = `<tr class="empty-row"><td colspan="${colSpan}">${message}</td></tr>`;
     } else {
-      this.body.innerHTML = this.changes.map((c) => this.renderRow(c)).join("");
+      this.body.innerHTML = visibleChanges.map((change) => this.renderRow(change)).join("");
     }
     this.updateCount();
     this.updateActionButton();
     this.renderComplianceSummary();
-    const toolbar = document.getElementById("previewModalToolbar");
-    if (toolbar) {
-      toolbar.hidden = this.mode === "view";
+    const showSelectionActions = this.mode !== "view";
+    if (this.selectAllBtn) {
+      this.selectAllBtn.hidden = !showSelectionActions;
+    }
+    if (this.clearBtn) {
+      this.clearBtn.hidden = !showSelectionActions;
     }
   },
 
   updateCount() {
-    if (this.countEl) {
-      if (this.mode === "view") {
-        this.countEl.textContent = `${this.changes.length} change${this.changes.length === 1 ? "" : "s"}`;
-      } else {
-        this.countEl.textContent = `${this.selectedIds.size} of ${this.changes.length} selected`;
-      }
+    if (!this.countEl) {
+      return;
     }
+    if (this.mode === "view") {
+      this.countEl.textContent = `${this.changes.length} change${this.changes.length === 1 ? "" : "s"}`;
+      return;
+    }
+    const visible = this.getVisibleChanges();
+    const selectedCount = visible.filter((change) => this.selectedIds.has(change.changeId)).length;
+    this.countEl.textContent = `${selectedCount} of ${visible.length} selected`;
   },
 
   updateActionButton() {
@@ -316,12 +417,13 @@ window.EditProPreviewModal = {
       return;
     }
     this.actionBtn.hidden = false;
-    const count = this.selectedIds.size;
+    const count = this.getSelectedChanges().length;
     if (this.mode === "revert") {
       this.actionBtn.textContent = count > 0 ? `Revert ${count} change${count === 1 ? "" : "s"}` : "Revert changes";
       this.actionBtn.className = "btn btn-danger";
     } else {
-      this.actionBtn.textContent = count > 0 ? `Sync ${count} change${count === 1 ? "" : "s"} to Shopify` : "Sync to Shopify";
+      this.actionBtn.textContent =
+        count > 0 ? `Sync ${count} change${count === 1 ? "" : "s"} to Shopify` : "Sync to Shopify";
       this.actionBtn.className = "btn btn-primary";
     }
     this.actionBtn.disabled = count === 0;

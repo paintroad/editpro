@@ -12,10 +12,17 @@ window.EditProMutations = {
         if (!fileMap.has(id)) {
           fileMap.set(id, { ...change, fileInput: { ...change.fileInput } });
         } else {
-          fileMap.get(id).fileInput = {
-            ...fileMap.get(id).fileInput,
+          const existing = fileMap.get(id);
+          existing.fileInput = {
+            ...existing.fileInput,
             ...change.fileInput,
           };
+          if (change.filenameSeedKey) {
+            existing.filenameSeedKey = change.filenameSeedKey;
+            existing.filenameTemplate = change.filenameTemplate;
+            existing.filenameBuildContext = change.filenameBuildContext;
+            existing.filenameCurrent = change.filenameCurrent;
+          }
         }
         continue;
       }
@@ -26,9 +33,10 @@ window.EditProMutations = {
           productMap.set(key, { ...change, input: { ...change.input } });
         } else {
           const existing = productMap.get(key);
-          existing.input = { ...existing.input, ...change.input };
-          if (existing.input.seo && change.input.seo) {
-            existing.input.seo = { ...existing.input.seo, ...change.input.seo };
+          const { seo: incomingSeo, ...restInput } = change.input;
+          existing.input = { ...existing.input, ...restInput };
+          if (incomingSeo) {
+            existing.input.seo = { ...(existing.input.seo || {}), ...incomingSeo };
           }
         }
         continue;
@@ -40,9 +48,10 @@ window.EditProMutations = {
           collectionMap.set(key, { ...change, input: { ...change.input } });
         } else {
           const existing = collectionMap.get(key);
-          existing.input = { ...existing.input, ...change.input };
-          if (existing.input.seo && change.input.seo) {
-            existing.input.seo = { ...existing.input.seo, ...change.input.seo };
+          const { seo: incomingSeo, ...restInput } = change.input;
+          existing.input = { ...existing.input, ...restInput };
+          if (incomingSeo) {
+            existing.input.seo = { ...(existing.input.seo || {}), ...incomingSeo };
           }
         }
         continue;
@@ -212,31 +221,173 @@ window.EditProMutations = {
     );
   },
 
+  isDuplicateFilenameError(message) {
+    const m = String(message || "").toLowerCase();
+    return (
+      m.includes("already") ||
+      m.includes("taken") ||
+      m.includes("duplicate") ||
+      (m.includes("filename") && m.includes("exist"))
+    );
+  },
+
+  async tryFileUpdate(change) {
+    const data = await EditProShopify.graphql(
+      `mutation FileUpdate($files: [FileUpdateInput!]!) {
+        fileUpdate(files: $files) {
+          userErrors { field message }
+        }
+      }`,
+      { files: [change.fileInput] }
+    );
+    const errors = data.fileUpdate?.userErrors || [];
+    if (errors.length) {
+      throw new Error(errors.map((e) => e.message).join("; "));
+    }
+  },
+
+  async retryFileUpdateWithFallbacks(change) {
+    if (!change.fileInput?.filename) {
+      throw new Error("No filename to retry");
+    }
+    const attempted = change.attemptedFilenames || new Set();
+    const markAttempted = (name) => {
+      const key = (name || "").toLowerCase();
+      if (key) {
+        attempted.add(key);
+      }
+    };
+    markAttempted(change.fileInput.filename);
+
+    if (
+      change.filenameSeedKey &&
+      change.filenameTemplate &&
+      typeof change.filenameBuildContext === "function"
+    ) {
+      const candidates = EditProRules.buildFilenameCandidates({
+        template: change.filenameTemplate,
+        buildContext: change.filenameBuildContext,
+        seedKey: change.filenameSeedKey,
+        currentFilename:
+          change.filenameCurrent || change.current || change.fileInput.filename,
+      });
+
+      for (const candidate of candidates) {
+        const key = (candidate || "").toLowerCase();
+        if (!key || attempted.has(key)) {
+          continue;
+        }
+        const retryChange = {
+          ...change,
+          fileInput: { ...change.fileInput, filename: candidate },
+          proposed: candidate,
+          attemptedFilenames: attempted,
+        };
+        markAttempted(candidate);
+        try {
+          await this.tryFileUpdate(retryChange);
+          return retryChange;
+        } catch (error) {
+          if (!this.isDuplicateFilenameError(error.message)) {
+            throw error;
+          }
+        }
+      }
+    }
+
+    const fallbacks = EditProRules.getRoomFallbacks();
+    const original = change.fileInput.filename;
+
+    for (let i = 0; i < fallbacks.length; i++) {
+      const suffix = EditProRules.sanitizeField(fallbacks[i]);
+      if (!suffix) {
+        continue;
+      }
+      const candidate = EditProRules.appendSuffixBeforeExt(original, suffix, original);
+      const key = candidate.toLowerCase();
+      if (attempted.has(key)) {
+        continue;
+      }
+      const retryChange = {
+        ...change,
+        fileInput: { ...change.fileInput, filename: candidate },
+        proposed: candidate,
+        attemptedFilenames: attempted,
+      };
+      markAttempted(candidate);
+      try {
+        await this.tryFileUpdate(retryChange);
+        return retryChange;
+      } catch (error) {
+        if (!this.isDuplicateFilenameError(error.message)) {
+          throw error;
+        }
+      }
+    }
+    throw new Error(`Could not find a unique filename for ${original}`);
+  },
+
+  async runFileUpdateWithDuplicateRetry(change) {
+    try {
+      await this.tryFileUpdate(change);
+      return change;
+    } catch (error) {
+      if (!this.isDuplicateFilenameError(error.message) || !change.fileInput?.filename) {
+        throw error;
+      }
+      return this.retryFileUpdateWithFallbacks(change);
+    }
+  },
+
+  lookupResourceForSeo(change) {
+    const storeData = window.EditProLive?.getStoreData?.() || {};
+    const resourceId = change.resourceId || change.input?.id;
+    if (!resourceId) {
+      return null;
+    }
+    if (change.resourceType === "product" || change.mutation === "productUpdate") {
+      return storeData.products?.find((item) => item.id === resourceId) || null;
+    }
+    if (change.resourceType === "collection" || change.mutation === "collectionUpdate") {
+      return storeData.collections?.find((item) => item.id === resourceId) || null;
+    }
+    return null;
+  },
+
+  completeSeoInput(change) {
+    if (!change.input?.seo) {
+      return change;
+    }
+    const seo = { ...change.input.seo };
+    const resource = this.lookupResourceForSeo(change);
+    const current = resource?.seo || {};
+    if (!("title" in seo)) {
+      seo.title = current.title ?? "";
+    }
+    if (!("description" in seo)) {
+      seo.description = current.description ?? "";
+    }
+    return {
+      ...change,
+      input: { ...change.input, seo },
+    };
+  },
+
   async runMutation(change) {
     if (change.mutation === "fileUpdate") {
-      const data = await EditProShopify.graphql(
-        `mutation FileUpdate($files: [FileUpdateInput!]!) {
-          fileUpdate(files: $files) {
-            userErrors { field message }
-          }
-        }`,
-        { files: [change.fileInput] }
-      );
-      const errors = data.fileUpdate?.userErrors || [];
-      if (errors.length) {
-        throw new Error(errors.map((e) => e.message).join("; "));
-      }
+      await this.runFileUpdateWithDuplicateRetry(change);
       return;
     }
 
     if (change.mutation === "productUpdate") {
+      const prepared = this.completeSeoInput(change);
       const data = await EditProShopify.graphql(
         `mutation ProductUpdate($input: ProductInput!) {
           productUpdate(input: $input) {
             userErrors { field message }
           }
         }`,
-        { input: change.input }
+        { input: prepared.input }
       );
       const errors = data.productUpdate?.userErrors || [];
       if (errors.length) {
@@ -246,13 +397,14 @@ window.EditProMutations = {
     }
 
     if (change.mutation === "collectionUpdate") {
+      const prepared = this.completeSeoInput(change);
       const data = await EditProShopify.graphql(
         `mutation CollectionUpdate($input: CollectionInput!) {
           collectionUpdate(input: $input) {
             userErrors { field message }
           }
         }`,
-        { input: change.input }
+        { input: prepared.input }
       );
       const errors = data.collectionUpdate?.userErrors || [];
       if (errors.length) {
@@ -381,17 +533,40 @@ window.EditProMutations = {
 
     const errors = [];
     const succeeded = [];
+    const retryQueue = [];
     changes.forEach((change, index) => {
       if (messageByIndex.has(index)) {
-        errors.push({
-          resourceTitle: change.resourceTitle,
-          field: change.field,
-          message: messageByIndex.get(index),
-        });
+        const message = messageByIndex.get(index);
+        if (
+          this.isDuplicateFilenameError(message) &&
+          change.field.toLowerCase().includes("filename") &&
+          change.fileInput?.filename
+        ) {
+          retryQueue.push(change);
+        } else {
+          errors.push({
+            resourceTitle: change.resourceTitle,
+            field: change.field,
+            message,
+          });
+        }
       } else {
         succeeded.push(change);
       }
     });
+
+    for (const change of retryQueue) {
+      try {
+        const updated = await this.retryFileUpdateWithFallbacks(change);
+        succeeded.push(updated);
+      } catch (error) {
+        errors.push({
+          resourceTitle: change.resourceTitle,
+          field: change.field,
+          message: error.message || String(error),
+        });
+      }
+    }
     return { errors, succeeded };
   },
 
