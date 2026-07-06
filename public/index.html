@@ -276,6 +276,9 @@
             <div class="fetch-overlay-panel">
               <p class="fetch-overlay-title" id="catalogJobOverlayTitle">Working…</p>
               <p id="catalogEnrichOverlayStatus" class="fetch-overlay-stats">Please wait…</p>
+              <button type="button" id="catalogJobStopBtn" class="btn btn-secondary btn-sm fetch-overlay-stop" hidden>
+                Stop generation
+              </button>
             </div>
           </div>
 
@@ -288,8 +291,10 @@
               <p id="catalogOrientationStatus" class="meta room-map-scan-status" hidden></p>
             </div>
             <div class="catalog-builder-action-right">
-              <a id="catalogExportLink" class="btn btn-secondary btn-sm square-download-link disabled" href="#" hidden>Export CSV</a>
               <button type="button" id="catalogLifestyleBtn" class="btn btn-secondary btn-sm" disabled>Generate lifestyle images</button>
+              <button type="button" id="catalogFixSeoBtn" class="btn btn-secondary btn-sm" disabled>Fix SEO</button>
+              <button type="button" id="catalogShopifyBtn" class="btn btn-secondary btn-sm" disabled>Add to Shopify</button>
+              <a id="catalogExportLink" class="btn btn-secondary btn-sm square-download-link disabled" href="#" hidden>Export CSV</a>
               <button type="button" id="catalogOrientationBtn" class="btn btn-secondary btn-sm" disabled>Re-detect orientation</button>
               <button type="button" id="catalogEnrichBtn" class="btn btn-primary btn-sm" disabled>Generate with OpenAI</button>
             </div>
@@ -308,9 +313,11 @@
                 <input type="text" id="catalogPathInput" placeholder="Path to painting images" />
               </label>
               <label class="catalog-path-field">
-                <span class="catalog-path-field-label">Frames</span>
+                <span class="catalog-path-field-header">
+                  <span class="catalog-path-field-label">Frames</span>
+                  <span id="catalogFramePathStatus" class="catalog-path-field-status meta" hidden aria-live="polite"></span>
+                </span>
                 <input type="text" id="catalogFramePathInput" placeholder="Path to frame templates (Portrait, Landscape, Square subfolders)" />
-                <span id="catalogFramePathStatus" class="catalog-path-field-status meta hidden" aria-live="polite"></span>
               </label>
               <label class="catalog-path-field">
                 <span class="catalog-path-field-label">Export</span>
@@ -809,6 +816,8 @@
     <script src="js/square-images.js"></script>
     <script src="js/multiselect-dropdown.js"></script>
     <script src="js/catalog.js"></script>
+    <script src="js/catalog-seo-fix.js"></script>
+    <script src="js/catalog-shopify-push.js"></script>
     <script src="js/room-map.js"></script>
   </body>
 </html>

@@ -201,9 +201,52 @@ window.EditProPreviewModal = {
   },
 
   annotateCompliance() {
+    if (this.mode === "catalog-shopify") {
+      for (const change of this.changes) {
+        if (change.error || change.skip) {
+          change.compliance = {
+            applicable: true,
+            status: "fail",
+            pass: false,
+            ruleKey: "ready",
+            ruleLabel: "Ready to push",
+            hint: change.error || "Cannot create this product.",
+          };
+          continue;
+        }
+        const seoTitle = change.previewMeta?.seoTitle || "";
+        const seoResult = EditProCatalogQuality.evaluateProposedValue(
+          "seoTitle",
+          seoTitle,
+          "product",
+          null,
+          null
+        );
+        if (change.previewMeta?.seoWarning) {
+          change.compliance = {
+            applicable: true,
+            status: "warn",
+            pass: true,
+            ruleKey: "seoTitle",
+            ruleLabel: EditProCatalogQuality.ISSUES.seoTitle,
+            hint: change.previewMeta.seoWarning,
+          };
+        } else {
+          change.compliance = {
+            applicable: true,
+            status: seoResult.status,
+            pass: seoResult.status === "pass",
+            ruleKey: "seoTitle",
+            ruleLabel: EditProCatalogQuality.ISSUES.seoTitle,
+            hint: seoResult.status === "pass" ? null : seoResult.hint,
+          };
+        }
+      }
+      return;
+    }
+
     for (const change of this.changes) {
-      const resource = this.lookupResource(change);
-      change.compliance = EditProCatalogQuality.evaluateProposedChange(change, resource);
+      change.compliance = EditProCatalogQuality.evaluateProposedChange(change, null);
     }
   },
 
@@ -219,6 +262,13 @@ window.EditProPreviewModal = {
     this.allFieldKeys = this.collectFieldKeys();
     this.enabledFieldKeys = new Set(this.allFieldKeys);
     this.selectedIds = new Set(this.changes.map((c) => c.changeId));
+    if (this.mode === "catalog-shopify") {
+      for (const change of this.changes) {
+        if (change.skip) {
+          this.selectedIds.delete(change.changeId);
+        }
+      }
+    }
     this.annotateCompliance();
     this.titleEl.textContent = title;
     EditProUtils.hideMessage(this.messageEl);
@@ -253,7 +303,11 @@ window.EditProPreviewModal = {
   },
 
   getSelectedChanges() {
-    return this.getVisibleChanges().filter((change) => this.selectedIds.has(change.changeId));
+    const selected = this.getVisibleChanges().filter((change) => this.selectedIds.has(change.changeId));
+    if (this.mode === "catalog-shopify") {
+      return selected.filter((change) => !change.skip);
+    }
+    return selected;
   },
 
   renderComplianceCell(change) {
@@ -421,6 +475,14 @@ window.EditProPreviewModal = {
     if (this.mode === "revert") {
       this.actionBtn.textContent = count > 0 ? `Revert ${count} change${count === 1 ? "" : "s"}` : "Revert changes";
       this.actionBtn.className = "btn btn-danger";
+    } else if (this.mode === "catalog-seo") {
+      this.actionBtn.textContent =
+        count > 0 ? `Apply fixes (${count})` : "Apply fixes";
+      this.actionBtn.className = "btn btn-primary";
+    } else if (this.mode === "catalog-shopify") {
+      this.actionBtn.textContent =
+        count > 0 ? `Create on Shopify (${count})` : "Create on Shopify";
+      this.actionBtn.className = "btn btn-primary";
     } else {
       this.actionBtn.textContent =
         count > 0 ? `Sync ${count} change${count === 1 ? "" : "s"} to Shopify` : "Sync to Shopify";
@@ -429,9 +491,130 @@ window.EditProPreviewModal = {
     this.actionBtn.disabled = count === 0;
   },
 
+  async runCatalogSeoAction(selected) {
+    if (
+      !window.confirm(`Apply ${selected.length} SEO fix${selected.length === 1 ? "" : "es"} to catalog products?`)
+    ) {
+      return;
+    }
+
+    EditProUtils.hideMessage(this.messageEl);
+    this.clearSyncErrors();
+    this.actionBtn.disabled = true;
+    this.progressWrap.hidden = false;
+    this.progressBar.style.width = "50%";
+
+    try {
+      const result = await EditProUtils.apiPost("/api/catalog/fix-seo/apply", { changes: selected });
+      this.progressBar.style.width = "100%";
+      const failed = result.errors?.length || 0;
+      if (failed) {
+        EditProUtils.showMessage(
+          this.messageEl,
+          `Apply finished with ${failed} error${failed === 1 ? "" : "s"}.`,
+          "warning"
+        );
+        this.showSyncErrors(
+          (result.errors || []).map((err) => ({
+            resourceTitle: err.resourceTitle,
+            field: err.field,
+            message: err.message,
+          }))
+        );
+      } else {
+        EditProUtils.showMessage(this.messageEl, "SEO fixes applied to catalog products.", "success");
+        if (typeof this.onComplete === "function") {
+          await this.onComplete({ failed: 0, succeeded: result.succeeded || [], count: selected.length });
+        }
+        setTimeout(() => this.close(), 800);
+      }
+    } catch (error) {
+      EditProUtils.showMessage(this.messageEl, error.message || "Failed to apply SEO fixes.", "error");
+    } finally {
+      this.progressWrap.hidden = true;
+      this.progressBar.style.width = "0%";
+      this.actionBtn.disabled = false;
+    }
+  },
+
+  async runCatalogShopifyAction(selected) {
+    if (
+      !window.confirm(
+        `Create ${selected.length} product${selected.length === 1 ? "" : "s"} on Shopify? Existing handles will be skipped.`
+      )
+    ) {
+      return;
+    }
+
+    EditProUtils.hideMessage(this.messageEl);
+    this.clearSyncErrors();
+    this.actionBtn.disabled = true;
+    this.progressWrap.hidden = false;
+    this.progressBar.style.width = "0%";
+
+    const productIds = selected.map((change) => change.catalogInput?.productId).filter(Boolean);
+    const pollTimer = setInterval(async () => {
+      try {
+        const status = await EditProUtils.apiGet("/api/catalog/shopify/status");
+        if (status?.total > 0) {
+          this.progressBar.style.width = `${Math.round((status.done / status.total) * 100)}%`;
+        }
+      } catch {
+        // ignore polling errors
+      }
+    }, 500);
+
+    try {
+      const result = await EditProUtils.apiPost("/api/catalog/shopify/push", { productIds });
+      clearInterval(pollTimer);
+      this.progressBar.style.width = "100%";
+      const failed = result.errors?.length || 0;
+      if (failed) {
+        EditProUtils.showMessage(
+          this.messageEl,
+          `Push finished with ${failed} error${failed === 1 ? "" : "s"}.`,
+          "warning"
+        );
+        this.showSyncErrors(
+          (result.errors || []).map((err) => ({
+            resourceTitle: err.resourceTitle || err.productId,
+            field: "Create product",
+            message: err.message,
+          }))
+        );
+        if (typeof this.onComplete === "function") {
+          await this.onComplete({ failed, succeeded: result.succeeded || [], count: selected.length });
+        }
+      } else {
+        EditProUtils.showMessage(this.messageEl, "Products created on Shopify.", "success");
+        if (typeof this.onComplete === "function") {
+          await this.onComplete({ failed: 0, succeeded: result.succeeded || [], count: selected.length });
+        }
+        setTimeout(() => this.close(), 800);
+      }
+    } catch (error) {
+      clearInterval(pollTimer);
+      EditProUtils.showMessage(this.messageEl, error.message || "Failed to push to Shopify.", "error");
+    } finally {
+      this.progressWrap.hidden = true;
+      this.progressBar.style.width = "0%";
+      this.actionBtn.disabled = false;
+    }
+  },
+
   async runAction() {
     const selected = this.getSelectedChanges();
     if (selected.length === 0) {
+      return;
+    }
+
+    if (this.mode === "catalog-seo") {
+      await this.runCatalogSeoAction(selected);
+      return;
+    }
+
+    if (this.mode === "catalog-shopify") {
+      await this.runCatalogShopifyAction(selected);
       return;
     }
 

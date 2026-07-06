@@ -461,7 +461,234 @@ window.EditProRules = {
   },
 
   makeChangeId(change) {
+    if (change.catalogInput?.imageIndex) {
+      return `${change.resourceId}|${change.field}|${change.mutation}|${change.catalogInput.imageIndex}`;
+    }
     return `${change.resourceId}|${change.field}|${change.mutation}`;
+  },
+
+  basenameFromPath(filePath) {
+    if (!filePath) {
+      return "";
+    }
+    const parts = String(filePath).split(/[/\\]/);
+    return parts[parts.length - 1] || "";
+  },
+
+  catalogProductImages(product) {
+    const images = [];
+    if (product.sourceImage?.path) {
+      images.push({
+        ...product.sourceImage,
+        catalogImageKind: "source",
+        lifestyleListIndex: null,
+      });
+    }
+    const lifestyle = [...(product.lifestyleImages || [])].sort(
+      (a, b) => (a.index ?? 0) - (b.index ?? 0)
+    );
+    for (let i = 0; i < lifestyle.length; i++) {
+      images.push({
+        ...lifestyle[i],
+        catalogImageKind: "lifestyle",
+        lifestyleListIndex: i,
+      });
+    }
+    return images.map((img, i) => ({ ...img, catalogGalleryIndex: i + 1 }));
+  },
+
+  collectCatalogFilenames(products) {
+    const used = new Set();
+    for (const product of products) {
+      for (const img of this.catalogProductImages(product)) {
+        const name = img.filename || this.basenameFromPath(img.path);
+        if (name) {
+          used.add(name.toLowerCase());
+        }
+      }
+    }
+    return used;
+  },
+
+  catalogResolveRoom(product, imageEntry, imageIndex, roomFallbackCache = {}) {
+    const roomLabel = imageEntry?.roomLabel || imageEntry?.room || "";
+    if (roomLabel && !(window.EditProImageRoomMap?.isNoneRoom?.(roomLabel))) {
+      return roomLabel;
+    }
+    const seedKey = `${product.productId}:${imageIndex}`;
+    if (!roomFallbackCache[seedKey]) {
+      const fallbacks = this.getRoomFallbacks();
+      const idx = fallbacks.length ? this.hashSeedKey(seedKey) % fallbacks.length : 0;
+      roomFallbackCache[seedKey] = fallbacks[idx] || "";
+    }
+    return roomFallbackCache[seedKey];
+  },
+
+  catalogProductContext(product, imageEntry, imageIndex, shopName, roomFallbackCache = {}) {
+    const description = EditProUtils.stripHtml(
+      product.descriptionHtml || product.descriptionPlain || ""
+    );
+    const title = product.title || "";
+    const productType = product.productType || "";
+    const currentFilename = imageEntry?.filename || this.basenameFromPath(imageEntry?.path);
+    const room = this.catalogResolveRoom(product, imageEntry, imageIndex, roomFallbackCache);
+    return {
+      title,
+      handle: product.handle || "",
+      productType,
+      shopName: shopName || "",
+      ...this.tagTokens(product.tags),
+      description,
+      description100: product.description100 || EditProUtils.truncate(description, 100),
+      description160: product.description160 || EditProUtils.truncate(description, 160),
+      product_name: title,
+      product_type: productType,
+      product_vendor: product.vendor || "",
+      shop_name: shopName || "",
+      room,
+      ...this.imageNumberTokens(imageIndex),
+      "image.alt": imageEntry?.alt || "",
+      "image.filename": currentFilename || "",
+    };
+  },
+
+  buildCatalogProductChanges(product, rules, shopName, descriptionPhrases, usedFilenames = null) {
+    const changes = [];
+    if (!rules) {
+      return changes;
+    }
+    const phrases = descriptionPhrases ?? window.EditProSettings?.descriptionPhrases;
+    const roomFallbackCache = {};
+    const filenameRegistry = usedFilenames || new Set();
+    const images = this.catalogProductImages(product);
+    const random = {
+      random_tag: this.pickRandom(product.tags),
+      random_description: this.pickRandom(phrases),
+    };
+    const base = this.mergeContext(
+      this.catalogProductContext(product, images[0] || {}, 0, shopName, roomFallbackCache),
+      random
+    );
+
+    const seoTitle = this.applyTemplate(rules.seoTitle, base);
+    const seoDescription = this.applyTemplate(rules.seoDescription, base);
+
+    if ((product.seoTitle || "") !== seoTitle) {
+      changes.push({
+        resourceType: "catalog-product",
+        resourceId: product.productId,
+        resourceTitle: product.title,
+        field: "SEO title",
+        current: product.seoTitle || "",
+        proposed: seoTitle,
+        mutation: "catalogSeoUpdate",
+        catalogInput: { productId: product.productId, field: "seoTitle", value: seoTitle },
+      });
+    }
+
+    if ((product.seoDescription || "") !== seoDescription) {
+      changes.push({
+        resourceType: "catalog-product",
+        resourceId: product.productId,
+        resourceTitle: product.title,
+        field: "SEO description",
+        current: product.seoDescription || "",
+        proposed: seoDescription,
+        mutation: "catalogSeoUpdate",
+        catalogInput: {
+          productId: product.productId,
+          field: "seoDescription",
+          value: seoDescription,
+        },
+      });
+    }
+
+    for (const imageEntry of images) {
+      const imageIndex = imageEntry.catalogGalleryIndex;
+      const currentFilename = imageEntry.filename || this.basenameFromPath(imageEntry.path);
+      const ctx = this.mergeContext(
+        this.catalogProductContext(product, imageEntry, imageIndex, shopName, roomFallbackCache),
+        random
+      );
+      const alt = this.applyTemplate(rules.imageAlt, ctx);
+      const filename = this.resolveUniqueImageFilename({
+        template: rules.imageFilename,
+        buildContext: () => ctx,
+        seedKey: `${product.productId}:${imageIndex}`,
+        usedFilenames: filenameRegistry,
+        currentFilename,
+      });
+
+      if ((imageEntry.alt || "") !== alt) {
+        changes.push({
+          resourceType: "catalog-product",
+          resourceId: product.productId,
+          resourceTitle: product.title,
+          field: `Image ${imageIndex} alt`,
+          current: imageEntry.alt || "",
+          proposed: alt,
+          mutation: "catalogImageAlt",
+          catalogInput: {
+            productId: product.productId,
+            imageKind: imageEntry.catalogImageKind,
+            lifestyleListIndex: imageEntry.lifestyleListIndex,
+            imageIndex,
+            value: alt,
+          },
+        });
+      }
+
+      if (filename && (currentFilename || "") !== filename) {
+        const seedKey = `${product.productId}:${imageIndex}`;
+        const dir = imageEntry.path
+          ? String(imageEntry.path).replace(/[/\\][^/\\]+$/, "")
+          : "";
+        const sep = dir.includes("\\") ? "\\" : "/";
+        changes.push({
+          resourceType: "catalog-product",
+          resourceId: product.productId,
+          resourceTitle: product.title,
+          field: `Image ${imageIndex} filename`,
+          current: currentFilename || "",
+          proposed: filename,
+          mutation: "catalogFileRename",
+          catalogInput: {
+            productId: product.productId,
+            imageKind: imageEntry.catalogImageKind,
+            lifestyleListIndex: imageEntry.lifestyleListIndex,
+            imageIndex,
+            oldPath: imageEntry.path,
+            newFilename: filename,
+            newPath: dir ? `${dir}${sep}${filename}` : filename,
+          },
+          ...this.filenameChangeMeta({
+            template: rules.imageFilename,
+            buildContext: () => ctx,
+            seedKey,
+            currentFilename,
+          }),
+        });
+      }
+    }
+
+    return changes;
+  },
+
+  buildCatalogSeoChanges(products, rules, shopName, descriptionPhrases) {
+    const usedFilenames = this.collectCatalogFilenames(products);
+    const changes = [];
+    for (const product of products) {
+      changes.push(
+        ...this.buildCatalogProductChanges(
+          product,
+          rules,
+          shopName,
+          descriptionPhrases,
+          usedFilenames
+        )
+      );
+    }
+    return changes.map((c) => this.annotateChange(c, null));
   },
 
   getRulesForType(resourceType) {

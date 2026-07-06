@@ -43,6 +43,12 @@ const {
   computeLifestyleStats,
 } = require("./lib/catalog-products-store");
 const { productsToCsv } = require("./lib/catalog-export");
+const { buildPreviewChanges, applyChanges } = require("./lib/catalog-seo-fix");
+const {
+  buildPreviewPlans,
+  pushProducts,
+  getPushStatus,
+} = require("./lib/catalog-shopify-push");
 const roomScanRunner = require("./lib/room-scan-runner");
 const catalogEnrichRunner = require("./lib/catalog-enrich-runner");
 const lifestyleRunner = require("./lib/lifestyle-runner");
@@ -799,6 +805,66 @@ router.get("/api/catalog/export", (_req, res) => {
     res.send(csv);
   } catch (error) {
     res.status(500).json({ error: error.message || "Failed to export catalog." });
+  }
+});
+
+router.post("/api/catalog/fix-seo/preview", (req, res) => {
+  try {
+    const productIds = Array.isArray(req.body?.productIds) ? req.body.productIds : [];
+    if (!productIds.length) {
+      return res.status(400).json({ error: "productIds is required." });
+    }
+    const changes = buildPreviewChanges(productIds);
+    res.json({ changes, count: changes.length });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to build SEO preview." });
+  }
+});
+
+router.post("/api/catalog/fix-seo/apply", (req, res) => {
+  try {
+    const changes = Array.isArray(req.body?.changes) ? req.body.changes : [];
+    if (!changes.length) {
+      return res.status(400).json({ error: "changes is required." });
+    }
+    const result = applyChanges(changes);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to apply SEO fixes." });
+  }
+});
+
+router.post("/api/catalog/shopify/preview", async (req, res) => {
+  try {
+    const productIds = Array.isArray(req.body?.productIds) ? req.body.productIds : [];
+    if (!productIds.length) {
+      return res.status(400).json({ error: "productIds is required." });
+    }
+    const plans = await buildPreviewPlans(productIds);
+    res.json({ changes: plans, count: plans.length });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to build Shopify preview." });
+  }
+});
+
+router.post("/api/catalog/shopify/push", async (req, res) => {
+  try {
+    const productIds = Array.isArray(req.body?.productIds) ? req.body.productIds : [];
+    if (!productIds.length) {
+      return res.status(400).json({ error: "productIds is required." });
+    }
+    const result = await pushProducts(productIds);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to push products to Shopify." });
+  }
+});
+
+router.get("/api/catalog/shopify/status", (_req, res) => {
+  try {
+    res.json(getPushStatus());
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to read push status." });
   }
 });
 

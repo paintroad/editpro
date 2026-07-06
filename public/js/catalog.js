@@ -8,6 +8,8 @@
   const importBtn = document.getElementById("catalogImportBtn");
   const enrichBtn = document.getElementById("catalogEnrichBtn");
   const lifestyleBtn = document.getElementById("catalogLifestyleBtn");
+  const fixSeoBtn = document.getElementById("catalogFixSeoBtn");
+  const shopifyBtn = document.getElementById("catalogShopifyBtn");
   const orientationBtn = document.getElementById("catalogOrientationBtn");
   const framePathInput = document.getElementById("catalogFramePathInput");
   const framePathStatusEl = document.getElementById("catalogFramePathStatus");
@@ -26,6 +28,7 @@
   const orientationStatusEl = document.getElementById("catalogOrientationStatus");
   const enrichOverlay = document.getElementById("catalogEnrichOverlay");
   const enrichOverlayStatus = document.getElementById("catalogEnrichOverlayStatus");
+  const jobStopBtn = document.getElementById("catalogJobStopBtn");
   const tableBody = document.getElementById("catalogTableBody");
   const messageEl = document.getElementById("catalogMessage");
   const detailModal = document.getElementById("catalogDetailModal");
@@ -47,6 +50,7 @@
   let lifestyleStats = null;
   let enrichPolling = null;
   let lifestylePolling = null;
+  let activeOverlayJob = null;
   let orientationPolling = null;
   let openAiConfigured = false;
   let pythonReady = false;
@@ -62,6 +66,14 @@
 
   function isEnrichEligible(row) {
     return row.status === "imported" || row.status === "error";
+  }
+
+  function isSeoFixEligible(row) {
+    return row.status === "enriched" && (row.lifestyleImageCount || 0) > 0;
+  }
+
+  function isShopifyEligible(row) {
+    return row.status === "enriched" && (row.lifestyleImageCount || 0) > 0;
   }
 
   function canSelect(row) {
@@ -282,7 +294,7 @@
     if (!summary) {
       framePathStatusEl.hidden = true;
       framePathStatusEl.textContent = "";
-      framePathStatusEl.className = "catalog-path-field-status meta hidden";
+      framePathStatusEl.className = "catalog-path-field-status meta";
       return;
     }
     const parts = [];
@@ -446,9 +458,53 @@
           ? `Generate lifestyle images (${selectedCount})`
           : "Generate lifestyle images";
     }
+    const seoFixSelected = getSelectedSeoFixEligibleCount();
+    if (fixSeoBtn) {
+      fixSeoBtn.disabled = busy || !seoFixSelected;
+      fixSeoBtn.textContent =
+        seoFixSelected > 0 ? `Fix SEO (${seoFixSelected})` : "Fix SEO";
+    }
+    const shopifySelected = getSelectedShopifyEligibleCount();
+    if (shopifyBtn) {
+      shopifyBtn.disabled = busy || !shopifySelected;
+      shopifyBtn.textContent =
+        shopifySelected > 0 ? `Add to Shopify (${shopifySelected})` : "Add to Shopify";
+    }
     if (orientationBtn) {
       orientationBtn.disabled = orientationActive || !products.length || !pythonPackagesReady;
     }
+  }
+
+  function getSelectedSeoFixEligibleCount() {
+    if (filterSelectAllActive) {
+      return getSelectableProducts().filter(isSeoFixEligible).length;
+    }
+    return products.filter((p) => selectedIds.has(p.productId) && isSeoFixEligible(p)).length;
+  }
+
+  function getSelectedShopifyEligibleCount() {
+    if (filterSelectAllActive) {
+      return getSelectableProducts().filter(isShopifyEligible).length;
+    }
+    return products.filter((p) => selectedIds.has(p.productId) && isShopifyEligible(p)).length;
+  }
+
+  function getSelectedSeoFixProductIds() {
+    if (filterSelectAllActive) {
+      return getSelectableProducts().filter(isSeoFixEligible).map((p) => p.productId);
+    }
+    return products
+      .filter((p) => selectedIds.has(p.productId) && isSeoFixEligible(p))
+      .map((p) => p.productId);
+  }
+
+  function getSelectedShopifyProductIds() {
+    if (filterSelectAllActive) {
+      return getSelectableProducts().filter(isShopifyEligible).map((p) => p.productId);
+    }
+    return products
+      .filter((p) => selectedIds.has(p.productId) && isShopifyEligible(p))
+      .map((p) => p.productId);
   }
 
   function getSelectedEnrichEligibleCount() {
@@ -852,6 +908,40 @@
     updateButtons(Boolean(enrichPolling || lifestylePolling || orientationPolling));
   }
 
+  function updateOverlayStopButton({ visible = false, label = "Stop generation", disabled = false } = {}) {
+    if (!jobStopBtn) {
+      return;
+    }
+    jobStopBtn.hidden = !visible;
+    jobStopBtn.textContent = label;
+    jobStopBtn.disabled = disabled;
+  }
+
+  async function stopActiveOverlayJob() {
+    if (!activeOverlayJob || jobStopBtn?.disabled) {
+      return;
+    }
+    updateOverlayStopButton({
+      visible: true,
+      label: "Stopping…",
+      disabled: true,
+    });
+    try {
+      if (activeOverlayJob === "lifestyle") {
+        await EditProUtils.apiPost("/api/catalog/lifestyle/stop", {});
+      } else if (activeOverlayJob === "enrich") {
+        await EditProUtils.apiPost("/api/catalog/enrich/stop", {});
+      }
+    } catch (error) {
+      showMessage(error.message || "Failed to stop job.", "error");
+      updateOverlayStopButton({
+        visible: true,
+        label: activeOverlayJob === "lifestyle" ? "Stop lifestyle generation" : "Stop enrichment",
+        disabled: false,
+      });
+    }
+  }
+
   function setJobOverlay(active, title, text) {
     if (enrichOverlay) {
       enrichOverlay.hidden = !active;
@@ -861,6 +951,10 @@
     }
     if (enrichOverlayStatus && text) {
       enrichOverlayStatus.textContent = text;
+    }
+    if (!active) {
+      activeOverlayJob = null;
+      updateOverlayStopButton({ visible: false });
     }
     updateButtons(active);
   }
@@ -880,6 +974,14 @@
         ? `Done — ${status.productsProcessed} products, ${status.imagesCreated} images${avgKb ? `, ${avgKb}` : ""}`
         : "";
     setJobOverlay(active, "Generating lifestyle images", overlayText);
+    if (active) {
+      activeOverlayJob = "lifestyle";
+      updateOverlayStopButton({
+        visible: true,
+        label: "Stop lifestyle generation",
+        disabled: false,
+      });
+    }
 
     if (!status || status.state === "idle") {
       return;
@@ -930,6 +1032,14 @@
     }
     const active = status?.state === "running" || status?.state === "paused";
     setEnrichOverlay(active, status?.lastTitle ? `Last: ${status.lastTitle}` : "Calling OpenAI…");
+    if (active) {
+      activeOverlayJob = "enrich";
+      updateOverlayStopButton({
+        visible: true,
+        label: "Stop enrichment",
+        disabled: false,
+      });
+    }
 
     if (!status || status.state === "idle") {
       enrichStatusEl.hidden = true;
@@ -1068,6 +1178,10 @@
   pathInput?.addEventListener("blur", savePath);
   framePathInput?.addEventListener("blur", saveFramePath);
   lifestyleOutputInput?.addEventListener("blur", saveLifestyleOutputPath);
+
+  jobStopBtn?.addEventListener("click", () => {
+    stopActiveOverlayJob();
+  });
 
   if (lifestyleBtn) {
     lifestyleBtn.addEventListener("click", async () => {
@@ -1234,4 +1348,16 @@
     .finally(() => {
       checkOrientationJobOnLoad();
     });
+
+  window.EditProCatalog = {
+    getProducts: () => products,
+    getProductRow: (productId) => products.find((p) => p.productId === productId) || null,
+    getSelectedProductIds,
+    getSelectedSeoFixProductIds,
+    getSelectedShopifyProductIds,
+    isSeoFixEligible,
+    isShopifyEligible,
+    refreshProducts,
+    showMessage,
+  };
 })();
