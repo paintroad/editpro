@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
+from functools import lru_cache
 from typing import Optional, Tuple
 
 import cv2
@@ -26,6 +28,20 @@ PLACEHOLDER_MAT_INSET_PX = 8
 QUAD_MIN_ASPECT_RATIO = 0.3
 QUAD_MAX_ASPECT_RATIO = 3.0
 
+# Blend defaults. blendMode "scene" imparts the frame's normalized lighting/shadow
+# onto the painting; "multiply" reproduces the exact old frame*paint/255 behavior.
+DEFAULT_BLEND_MODE = "scene"
+DEFAULT_BLEND_STRENGTH = 1.0
+# Percentile of in-region frame luminance treated as the "white" reference (no darkening).
+BLEND_SHADING_REFERENCE_PERCENTILE = 97.0
+
+ORIENTATION_LABELS = {
+    "portrait": "Portrait",
+    "landscape": "Landscape",
+    "square": "Square",
+}
+FRAME_QUADS_PATH = os.path.join(os.path.dirname(__file__), "frame-quads.json")
+
 _PLACEHOLDER_GREY_BGR = np.array(
     [[[PLACEHOLDER_GREY_RGB[2], PLACEHOLDER_GREY_RGB[1], PLACEHOLDER_GREY_RGB[0]]]], dtype=np.uint8
 )
@@ -34,6 +50,55 @@ _PLACEHOLDER_GREEN_BGR = np.array(
 )
 _PLACEHOLDER_GREY_LAB = cv2.cvtColor(_PLACEHOLDER_GREY_BGR, cv2.COLOR_BGR2LAB)[0, 0].astype(np.float32)
 _PLACEHOLDER_GREEN_LAB = cv2.cvtColor(_PLACEHOLDER_GREEN_BGR, cv2.COLOR_BGR2LAB)[0, 0].astype(np.float32)
+
+
+def _normalize_orientation_label(orientation: Optional[str]) -> Optional[str]:
+    if not orientation:
+        return None
+    key = str(orientation).strip().lower()
+    if key in ORIENTATION_LABELS:
+        return ORIENTATION_LABELS[key]
+    label = str(orientation).strip()
+    return label[:1].upper() + label[1:] if label else None
+
+
+@lru_cache(maxsize=1)
+def load_frame_quads() -> dict:
+    if not os.path.isfile(FRAME_QUADS_PATH):
+        return {}
+    try:
+        with open(FRAME_QUADS_PATH, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    return payload.get("quads") or {}
+
+
+def stored_quad_for(
+    orientation: Optional[str],
+    frame_template: Optional[str],
+    canvas_size: int = CANVAS_SIZE,
+) -> Optional[np.ndarray]:
+    orientation_label = _normalize_orientation_label(orientation)
+    template = str(frame_template or "").strip()
+    if not orientation_label or not template:
+        return None
+
+    entry = (load_frame_quads().get(orientation_label) or {}).get(template)
+    if not entry:
+        return None
+
+    points = entry.get("points")
+    if not isinstance(points, list) or len(points) != 4:
+        return None
+
+    quad = np.array(points, dtype=np.float32)
+    if quad.shape != (4, 2):
+        return None
+
+    quad[:, 0] *= float(canvas_size)
+    quad[:, 1] *= float(canvas_size)
+    return order_points(quad)
 
 
 def luminance(r: float, g: float, b: float) -> float:
@@ -65,24 +130,19 @@ def fallback_rect(size: int) -> np.ndarray:
 
 
 def detect_painting_content(painting_bgr: np.ndarray) -> np.ndarray:
-    rgb = cv2.cvtColor(painting_bgr, cv2.COLOR_BGR2RGB)
-    h, w = rgb.shape[:2]
-    min_x, min_y, max_x, max_y = w, h, -1, -1
-    dark_count = 0
+    h, w = painting_bgr.shape[:2]
+    # Vectorized luminance from BGR channels (matches luminance(): 0.299R + 0.587G + 0.114B).
+    frame_f = painting_bgr.astype(np.float32)
+    lum = 0.114 * frame_f[..., 0] + 0.587 * frame_f[..., 1] + 0.299 * frame_f[..., 2]
+    dark = lum < DARK_THRESHOLD
 
-    for y in range(h):
-        for x in range(w):
-            r, g, b = rgb[y, x]
-            if luminance(float(r), float(g), float(b)) < DARK_THRESHOLD:
-                dark_count += 1
-                min_x = min(min_x, x)
-                min_y = min(min_y, y)
-                max_x = max(max_x, x)
-                max_y = max(max_y, y)
-
-    if dark_count == 0 or max_x < min_x or max_y < min_y:
+    if not np.any(dark):
         pad = max(2, int(min(h, w) * 0.02))
         return painting_bgr[pad : h - pad, pad : w - pad]
+
+    ys, xs = np.where(dark)
+    min_x, max_x = int(xs.min()), int(xs.max())
+    min_y, max_y = int(ys.min()), int(ys.max())
 
     pad = 2
     min_x = max(0, min_x - pad)
@@ -808,12 +868,41 @@ def fit_painting_to_quad(painting_bgr: np.ndarray, quad: np.ndarray) -> Tuple[np
     return warped, geom_mask
 
 
-def multiply_blend(frame_bgr: np.ndarray, painting_bgr: np.ndarray, mask: np.ndarray) -> np.ndarray:
+def multiply_blend(
+    frame_bgr: np.ndarray,
+    painting_bgr: np.ndarray,
+    mask: np.ndarray,
+    mode: str = DEFAULT_BLEND_MODE,
+    strength: float = DEFAULT_BLEND_STRENGTH,
+) -> np.ndarray:
     frame_f = frame_bgr.astype(np.float32)
     paint_f = painting_bgr.astype(np.float32)
     alpha = (mask.astype(np.float32) / 255.0)[..., None]
-    blended = (frame_f * paint_f) / 255.0
-    result = frame_f * (1.0 - alpha) + blended * alpha
+
+    if str(mode).strip().lower() == "multiply":
+        # Legacy behaviour: true multiply against the raw frame color.
+        shaded = (frame_f * paint_f) / 255.0
+    else:
+        # Scene-shading: normalize the frame's in-region luminance so the brightest
+        # mat pixels leave the painting untouched and only shadows/light falloff
+        # darken it. This imparts the room's lighting without uniform dimming.
+        lum = 0.114 * frame_f[..., 0] + 0.587 * frame_f[..., 1] + 0.299 * frame_f[..., 2]
+        region_vals = lum[mask > 0]
+        if region_vals.size:
+            # Subsample for the percentile: a global brightness reference is stable
+            # under sampling, and this avoids sorting ~1M pixels every frame.
+            if region_vals.size > 50000:
+                region_vals = region_vals[:: region_vals.size // 50000]
+            ref = float(np.percentile(region_vals, BLEND_SHADING_REFERENCE_PERCENTILE))
+        else:
+            ref = 255.0
+        ref = max(ref, 1.0)
+        shading = np.clip(lum / ref, 0.0, 1.0)[..., None]
+        clamped_strength = float(np.clip(strength, 0.0, 1.0))
+        shading = 1.0 - clamped_strength * (1.0 - shading)
+        shaded = paint_f * shading
+
+    result = frame_f * (1.0 - alpha) + shaded * alpha
     return np.clip(result, 0, 255).astype(np.uint8)
 
 
@@ -823,49 +912,64 @@ def composite_painting_into_frame(
     output_path: str,
     canvas_size: int = CANVAS_SIZE,
     jpeg_quality: int = 88,
+    orientation: Optional[str] = None,
+    frame_template: Optional[str] = None,
+    painting_crop: Optional[np.ndarray] = None,
+    blend_mode: str = DEFAULT_BLEND_MODE,
+    blend_strength: float = DEFAULT_BLEND_STRENGTH,
 ) -> dict:
-    painting_bgr = cv2.imread(painting_path, cv2.IMREAD_COLOR)
+    # painting_crop may be supplied pre-cropped (read + detected once per product);
+    # otherwise read and crop here for standalone use.
+    if painting_crop is None:
+        painting_bgr = cv2.imread(painting_path, cv2.IMREAD_COLOR)
+        if painting_bgr is None:
+            raise ValueError(f"Could not read painting: {painting_path}")
+        painting_crop = detect_painting_content(painting_bgr)
+
     frame_bgr = cv2.imread(frame_path, cv2.IMREAD_COLOR)
-    if painting_bgr is None:
-        raise ValueError(f"Could not read painting: {painting_path}")
     if frame_bgr is None:
         raise ValueError(f"Could not read frame: {frame_path}")
 
-    painting_crop = detect_painting_content(painting_bgr)
     frame_resized = _ensure_canvas(frame_bgr, canvas_size)
-    green_mask = _morph_placeholder_mask(
-        _color_match_mask(
-            frame_resized,
-            PLACEHOLDER_GREEN_RGB,
-            _PLACEHOLDER_GREEN_LAB,
-            PLACEHOLDER_RGB_TOLERANCE,
-            PLACEHOLDER_LAB_TOLERANCE,
-        )
-    )
-    use_green_mat = _resolve_green_mat_mode(frame_resized, green_mask, canvas_size)
-    placeholder_mask = detect_placeholder_mask(frame_resized, canvas_size)
-    solid_mask = _filled_placeholder_mask(
-        placeholder_mask, canvas_size, use_green_mat=use_green_mat
-    )
-    quad = detect_placeholder_quad(
-        frame_resized,
-        canvas_size,
-        placeholder_mask=placeholder_mask,
-        use_green_mat=use_green_mat,
-    )
-    warped, geom_mask = fit_painting_to_quad(painting_crop, quad)
-    quad_mask = _mask_from_quad(quad, canvas_size)
-    flat_template = _is_flat_template_mat(solid_mask, canvas_size)
-    overlap = cv2.bitwise_and(solid_mask, quad_mask)
-    if flat_template:
-        solid_mask = quad_mask
-    elif cv2.countNonZero(overlap) < cv2.countNonZero(quad_mask) * 0.5:
-        solid_mask = _inset_filled_mask(quad_mask)
+    stored_quad = stored_quad_for(orientation, frame_template, canvas_size)
+    if stored_quad is not None:
+        quad = stored_quad
+        warped, geom_mask = fit_painting_to_quad(painting_crop, quad)
+        region_mask = _mask_from_quad(quad, canvas_size)
     else:
-        solid_mask = cv2.bitwise_and(solid_mask, quad_mask)
-    region_mask = cv2.bitwise_and(geom_mask, solid_mask)
+        green_mask = _morph_placeholder_mask(
+            _color_match_mask(
+                frame_resized,
+                PLACEHOLDER_GREEN_RGB,
+                _PLACEHOLDER_GREEN_LAB,
+                PLACEHOLDER_RGB_TOLERANCE,
+                PLACEHOLDER_LAB_TOLERANCE,
+            )
+        )
+        use_green_mat = _resolve_green_mat_mode(frame_resized, green_mask, canvas_size)
+        placeholder_mask = detect_placeholder_mask(frame_resized, canvas_size)
+        solid_mask = _filled_placeholder_mask(
+            placeholder_mask, canvas_size, use_green_mat=use_green_mat
+        )
+        quad = detect_placeholder_quad(
+            frame_resized,
+            canvas_size,
+            placeholder_mask=placeholder_mask,
+            use_green_mat=use_green_mat,
+        )
+        warped, geom_mask = fit_painting_to_quad(painting_crop, quad)
+        quad_mask = _mask_from_quad(quad, canvas_size)
+        flat_template = _is_flat_template_mat(solid_mask, canvas_size)
+        overlap = cv2.bitwise_and(solid_mask, quad_mask)
+        if flat_template:
+            solid_mask = quad_mask
+        elif cv2.countNonZero(overlap) < cv2.countNonZero(quad_mask) * 0.5:
+            solid_mask = _inset_filled_mask(quad_mask)
+        else:
+            solid_mask = cv2.bitwise_and(solid_mask, quad_mask)
+        region_mask = cv2.bitwise_and(geom_mask, solid_mask)
 
-    result = multiply_blend(frame_resized, warped, region_mask)
+    result = multiply_blend(frame_resized, warped, region_mask, mode=blend_mode, strength=blend_strength)
 
     if os.getenv("EDITPRO_COMPOSITOR_DEBUG") == "1":
         _write_compositor_debug(frame_resized, quad, output_path, region_mask, canvas_size)
@@ -894,6 +998,8 @@ def generate_for_product(
     frames: Optional[list] = None,
     canvas_size: int = CANVAS_SIZE,
     jpeg_quality: int = 88,
+    blend_mode: str = DEFAULT_BLEND_MODE,
+    blend_strength: float = DEFAULT_BLEND_STRENGTH,
 ) -> dict:
     os.makedirs(output_dir, exist_ok=True)
     images = []
@@ -915,12 +1021,23 @@ def generate_for_product(
     else:
         return {"images": [], "totalBytes": 0, "errors": [{"message": "No frames provided."}]}
 
+    # Read + crop the painting once and reuse across all frames for this product.
+    painting_bgr = cv2.imread(painting_path, cv2.IMREAD_COLOR)
+    if painting_bgr is None:
+        return {
+            "images": [],
+            "totalBytes": 0,
+            "errors": [{"message": f"Could not read painting: {painting_path}"}],
+        }
+    painting_crop = detect_painting_content(painting_bgr)
+
     for entry in frame_entries:
         frame_path = entry.get("framePath") or entry.get("frame_path")
         output_index = entry.get("outputIndex", entry.get("output_index"))
         if output_index is None:
             output_index = 0
         frame_name = entry.get("frameTemplate") or entry.get("frame_template") or os.path.basename(frame_path or "")
+        orientation = entry.get("orientation")
         room = entry.get("room")
         filename = f"{output_base_name}_{output_index}.jpg"
         output_path = os.path.join(output_dir, filename)
@@ -931,6 +1048,11 @@ def generate_for_product(
                 output_path,
                 canvas_size=canvas_size,
                 jpeg_quality=jpeg_quality,
+                orientation=orientation,
+                frame_template=frame_name,
+                painting_crop=painting_crop,
+                blend_mode=blend_mode,
+                blend_strength=blend_strength,
             )
             total_bytes += result["bytes"]
             image_record = {

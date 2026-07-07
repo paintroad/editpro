@@ -49,6 +49,7 @@
   let products = [];
   let lifestyleStats = null;
   let enrichPolling = null;
+  let enrichStartedAt = null;
   let lifestylePolling = null;
   let activeOverlayJob = null;
   let orientationPolling = null;
@@ -1026,12 +1027,46 @@
     }, 1500);
   }
 
+  function formatEnrichEta(seconds) {
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      return "";
+    }
+    if (seconds < 60) {
+      return `~${Math.ceil(seconds)}s left`;
+    }
+    return `~${Math.ceil(seconds / 60)} min left`;
+  }
+
+  function getEnrichEtaText(status) {
+    if (!enrichStartedAt || !status || status.current <= 0 || status.total <= status.current) {
+      return "";
+    }
+    const elapsedSec = (Date.now() - enrichStartedAt) / 1000;
+    const avgSec = elapsedSec / status.current;
+    return formatEnrichEta(avgSec * (status.total - status.current));
+  }
+
   function renderEnrichStatus(status) {
     if (!enrichStatusEl) {
       return;
     }
     const active = status?.state === "running" || status?.state === "paused";
-    setEnrichOverlay(active, status?.lastTitle ? `Last: ${status.lastTitle}` : "Calling OpenAI…");
+    const etaText = status?.state === "running" ? getEnrichEtaText(status) : "";
+    const overlayParts = [];
+    if (status?.state === "running") {
+      overlayParts.push(`${status.current} / ${status.total}`);
+      if (etaText) {
+        overlayParts.push(etaText);
+      }
+      if (status.lastTitle) {
+        overlayParts.push(status.lastTitle);
+      }
+    } else if (status?.lastTitle) {
+      overlayParts.push(`Last: ${status.lastTitle}`);
+    } else {
+      overlayParts.push("Calling OpenAI…");
+    }
+    setEnrichOverlay(active, overlayParts.join(" — "));
     if (active) {
       activeOverlayJob = "enrich";
       updateOverlayStopButton({
@@ -1048,7 +1083,8 @@
 
     enrichStatusEl.hidden = false;
     if (status.state === "running") {
-      enrichStatusEl.textContent = `Generating ${status.current} / ${status.total} (${status.concurrency || 1} parallel)${status.lastTitle ? ` — ${status.lastTitle}` : ""}`;
+      const etaPart = etaText ? ` — ${etaText}` : "";
+      enrichStatusEl.textContent = `Generating ${status.current} / ${status.total} (${status.concurrency || 1} parallel)${etaPart}${status.lastTitle ? ` — ${status.lastTitle}` : ""}`;
       enrichStatusEl.className = "meta room-map-scan-status";
     } else if (status.state === "paused") {
       enrichStatusEl.textContent = `Paused — ${status.pauseReason || "system load"}`;
@@ -1070,11 +1106,13 @@
       clearInterval(enrichPolling);
       enrichPolling = null;
     }
+    enrichStartedAt = null;
     setEnrichOverlay(false);
   }
 
   function startEnrichPolling() {
     stopEnrichPolling();
+    enrichStartedAt = Date.now();
     enrichPolling = setInterval(async () => {
       try {
         const status = await EditProUtils.apiGet("/api/catalog/enrich/status");

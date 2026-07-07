@@ -51,6 +51,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7a2 2 0 012-2h3l2 2h7a2 2 0 012 2v9a2 2 0 01-2 2H6a2 2 0 01-2-2V7z"/><path stroke-linecap="round" d="M8 13h8M8 17h5"/></svg>
             <span class="rail-module-label">Catalog</span>
           </button>
+          <button type="button" class="rail-module" data-module="marketplace" title="Marketplace" aria-label="Marketplace">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7h18M5 7l1.5 12h11L19 7M9 11v6M15 11v6M10 7V5a2 2 0 012-2h0a2 2 0 012 2v2"/></svg>
+            <span class="rail-module-label">Marketplace</span>
+          </button>
           <button type="button" class="rail-module" data-module="roommap" title="Image Room Map" aria-label="Image Room Map">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 10.5V19a1 1 0 001 1h6v-6.5H3zm8 0V20h6a1 1 0 001-1v-8.5h-7zm8-1.5V19a1 1 0 01-1 1h-2V9H19a1 1 0 011 1v1z"/><path stroke-linecap="round" stroke-linejoin="round" d="M3 9.5L12 4l9 5.5"/></svg>
             <span class="rail-module-label">Image Room Map</span>
@@ -400,6 +404,60 @@
               <div id="catalogDetailBody" class="modal-body"></div>
             </div>
           </div>
+        </div>
+
+        <div id="module-marketplace" class="module-panel marketplace-module" hidden>
+          <div class="marketplace-action-bar">
+            <div class="marketplace-action-left">
+              <span class="marketplace-module-title">Marketplace Export</span>
+              <span id="marketplaceProductCountBadge" class="badge">0 products</span>
+              <p id="marketplaceStatsMeta" class="meta marketplace-stats">Choose a data source to begin.</p>
+            </div>
+          </div>
+
+          <div id="marketplaceMessage" class="message seo-toast hidden" role="alert"></div>
+
+          <section class="card marketplace-download-card">
+            <h2>Default download folder</h2>
+            <div class="folder-row">
+              <input
+                type="text"
+                id="marketplaceDownloadPath"
+                placeholder="Paste a folder path where exports are saved (e.g. C:\Users\divya\Downloads\Marketplace\Exports)"
+              />
+              <button type="button" id="marketplaceDownloadPathBtn" class="btn btn-secondary">Use path</button>
+            </div>
+            <p id="marketplaceDownloadPathMeta" class="meta">
+              Leave blank to keep exports in the app's default location. Applies to all marketplaces.
+            </p>
+          </section>
+
+          <section class="card marketplace-source-card">
+            <h2>Data source</h2>
+            <div class="marketplace-source-toggle" role="radiogroup" aria-label="Export data source">
+              <label class="marketplace-source-option">
+                <input type="radio" name="marketplaceSource" value="shopify" checked />
+                <span>Shopify live</span>
+              </label>
+              <label class="marketplace-source-option">
+                <input type="radio" name="marketplaceSource" value="catalog" />
+                <span>Catalog Builder</span>
+              </label>
+            </div>
+            <p id="marketplaceSourceNote" class="meta marketplace-source-note">
+              Shopify live includes public image URLs and variant pricing from your connected store.
+            </p>
+            <label id="marketplaceShopifyFilterWrap" class="field marketplace-shopify-filter">
+              <span>Shopify products</span>
+              <select id="marketplaceShopifyFilter">
+                <option value="all">All products</option>
+                <option value="live" selected>Live only</option>
+                <option value="drafts">Drafts only</option>
+              </select>
+            </label>
+          </section>
+
+          <div id="marketplaceCards" class="marketplace-cards"></div>
         </div>
 
         <div id="module-roommap" class="module-panel roommap-module" hidden>
@@ -819,5 +877,6 @@
     <script src="js/catalog-seo-fix.js"></script>
     <script src="js/catalog-shopify-push.js"></script>
     <script src="js/room-map.js"></script>
+    <script src="js/marketplace.js"></script>
   </body>
 </html>

@@ -55,6 +55,17 @@ const lifestyleRunner = require("./lib/lifestyle-runner");
 const orientationRunner = require("./lib/orientation-runner");
 const pythonSetup = require("./lib/python-setup");
 const { summarizeFrameTemplates } = require("./lib/frame-template-parser");
+const {
+  listMarketplaces,
+  getMarketplace,
+} = require("./lib/marketplace/registry");
+const {
+  inspectMarketplace,
+  exportMarketplace,
+  getExportFilePath,
+  defaultSamplePath,
+  DEFAULT_TEMPLATE_DIR,
+} = require("./lib/marketplace/export-service");
 
 const app = express();
 const PORT = process.env.PORT || 3847;
@@ -805,6 +816,56 @@ router.get("/api/catalog/export", (_req, res) => {
     res.send(csv);
   } catch (error) {
     res.status(500).json({ error: error.message || "Failed to export catalog." });
+  }
+});
+
+router.get("/api/marketplace/list", (_req, res) => {
+  try {
+    const marketplaces = listMarketplaces().map((marketplace) => ({
+      ...marketplace,
+      defaultSamplePath: defaultSamplePath(getMarketplace(marketplace.id)),
+    }));
+    res.json({
+      marketplaces,
+      defaultTemplateDir: DEFAULT_TEMPLATE_DIR,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to list marketplaces." });
+  }
+});
+
+router.post("/api/marketplace/inspect", async (req, res) => {
+  try {
+    const { marketplaceId, samplePath, source, outputDir, shopifyProductFilter } = req.body || {};
+    if (!marketplaceId) {
+      return res.status(400).json({ error: "marketplaceId is required." });
+    }
+    const result = await inspectMarketplace({ marketplaceId, samplePath, source, shopifyProductFilter });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to inspect marketplace template." });
+  }
+});
+
+router.post("/api/marketplace/export", async (req, res) => {
+  try {
+    const { marketplaceId, samplePath, source, outputDir, shopifyProductFilter } = req.body || {};
+    if (!marketplaceId) {
+      return res.status(400).json({ error: "marketplaceId is required." });
+    }
+    const result = await exportMarketplace({ marketplaceId, samplePath, source, outputDir, shopifyProductFilter });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to export marketplace feed." });
+  }
+});
+
+router.get("/api/marketplace/download/:fileName", (req, res) => {
+  try {
+    const filePath = getExportFilePath(req.params.fileName);
+    res.download(filePath);
+  } catch (error) {
+    res.status(404).json({ error: error.message || "Export file not found." });
   }
 });
 

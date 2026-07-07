@@ -10,6 +10,7 @@
   const moduleLive = document.getElementById("module-live");
   const moduleSquare = document.getElementById("module-square");
   const moduleCatalog = document.getElementById("module-catalog");
+  const moduleMarketplace = document.getElementById("module-marketplace");
   const moduleRoommap = document.getElementById("module-roommap");
   const connectionModal = document.getElementById("connectionModal");
   const settingsModal = document.getElementById("settingsModal");
@@ -32,6 +33,9 @@
     }
     if (moduleCatalog) {
       moduleCatalog.hidden = moduleId !== "catalog";
+    }
+    if (moduleMarketplace) {
+      moduleMarketplace.hidden = moduleId !== "marketplace";
     }
     if (moduleRoommap) {
       moduleRoommap.hidden = moduleId !== "roommap";
