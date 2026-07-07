@@ -246,6 +246,15 @@
     }
   }
 
+  function excludedProductsNote(result) {
+    if (!result?.excludedCount) {
+      return "";
+    }
+    const handles = (result.excludedProducts || []).map((p) => p.handle).join(", ");
+    const label = result.excludedCount === 1 ? "product" : "products";
+    return ` ${result.excludedCount} ${label} excluded${handles ? ` (${handles})` : ""}.`;
+  }
+
   function getSamplePathForMarketplace(marketplaceId) {
     const els = getCardElements(marketplaceId);
     return els.input?.value?.trim() || loadSamplePath(marketplaceId);
@@ -312,7 +321,7 @@
       const preview = (result.headers || []).slice(0, 8).join(", ");
       setCardStatus(
         marketplaceId,
-        `${result.columnCount} columns detected. Data starts at row ${result.dataStartRow}. Preview: ${preview}${result.headers?.length > 8 ? "…" : ""}`
+        `${result.columnCount} columns detected. Data starts at row ${result.dataStartRow}. Preview: ${preview}${result.headers?.length > 8 ? "…" : ""}${excludedProductsNote(result)}`
       );
       if (productCountBadge) {
         productCountBadge.textContent = `${result.productCount} products`;
@@ -355,11 +364,11 @@
       const savedInfo = result.savedDir ? ` Saved to ${result.savedDir}.` : "";
       setCardStatus(
         marketplaceId,
-        `Exported ${result.variantCount} rows from ${result.productCount} products into ${partLabel}.${savedInfo} ${result.notes || ""}`.trim()
+        `Exported ${result.variantCount} rows from ${result.productCount} products into ${partLabel}.${savedInfo}${excludedProductsNote(result)} ${result.notes || ""}`.trim()
       );
       EditProUtils.showMessage(
         messageEl,
-        `${result.name} export ready (${partLabel}).${savedInfo}`,
+        `${result.name} export ready (${partLabel}).${savedInfo}${excludedProductsNote(result)}`,
         "success"
       );
       if (result.warnings?.length) {
