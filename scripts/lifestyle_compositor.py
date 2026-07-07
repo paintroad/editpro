@@ -78,13 +78,25 @@ def stored_quad_for(
     orientation: Optional[str],
     frame_template: Optional[str],
     canvas_size: int = CANVAS_SIZE,
+    frame_set: Optional[str] = None,
 ) -> Optional[np.ndarray]:
     orientation_label = _normalize_orientation_label(orientation)
     template = str(frame_template or "").strip()
-    if not orientation_label or not template:
+    if not template:
         return None
 
-    entry = (load_frame_quads().get(orientation_label) or {}).get(template)
+    quads = load_frame_quads()
+    lookup_keys: list[str] = []
+    if frame_set:
+        lookup_keys.append(str(frame_set).strip())
+    if orientation_label:
+        lookup_keys.append(orientation_label)
+
+    entry = None
+    for key in lookup_keys:
+        entry = (quads.get(key) or {}).get(template)
+        if entry:
+            break
     if not entry:
         return None
 
@@ -914,6 +926,7 @@ def composite_painting_into_frame(
     jpeg_quality: int = 88,
     orientation: Optional[str] = None,
     frame_template: Optional[str] = None,
+    frame_set: Optional[str] = None,
     painting_crop: Optional[np.ndarray] = None,
     blend_mode: str = DEFAULT_BLEND_MODE,
     blend_strength: float = DEFAULT_BLEND_STRENGTH,
@@ -931,7 +944,7 @@ def composite_painting_into_frame(
         raise ValueError(f"Could not read frame: {frame_path}")
 
     frame_resized = _ensure_canvas(frame_bgr, canvas_size)
-    stored_quad = stored_quad_for(orientation, frame_template, canvas_size)
+    stored_quad = stored_quad_for(orientation, frame_template, canvas_size, frame_set=frame_set)
     if stored_quad is not None:
         quad = stored_quad
         warped, geom_mask = fit_painting_to_quad(painting_crop, quad)
@@ -1038,6 +1051,7 @@ def generate_for_product(
             output_index = 0
         frame_name = entry.get("frameTemplate") or entry.get("frame_template") or os.path.basename(frame_path or "")
         orientation = entry.get("orientation")
+        frame_set = entry.get("frameSet") or entry.get("frame_set")
         room = entry.get("room")
         filename = f"{output_base_name}_{output_index}.jpg"
         output_path = os.path.join(output_dir, filename)
@@ -1050,6 +1064,7 @@ def generate_for_product(
                 jpeg_quality=jpeg_quality,
                 orientation=orientation,
                 frame_template=frame_name,
+                frame_set=frame_set,
                 painting_crop=painting_crop,
                 blend_mode=blend_mode,
                 blend_strength=blend_strength,

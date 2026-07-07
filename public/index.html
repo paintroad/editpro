@@ -404,6 +404,24 @@
               <div id="catalogDetailBody" class="modal-body"></div>
             </div>
           </div>
+
+          <div id="catalogFrameSetModal" class="modal" hidden>
+            <div class="modal-backdrop" data-catalog-frameset-close></div>
+            <div class="modal-panel" role="dialog" aria-labelledby="catalogFrameSetModalTitle">
+              <div class="modal-header">
+                <h2 id="catalogFrameSetModalTitle">Choose frame sets</h2>
+                <button type="button" class="btn btn-ghost btn-sm" data-catalog-frameset-close aria-label="Close">×</button>
+              </div>
+              <div class="modal-body">
+                <p class="meta">Multiple frame folders were found for one or more orientations in your selection. Pick which set to use for each.</p>
+                <div id="catalogFrameSetChoices" class="catalog-frameset-choices"></div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-catalog-frameset-close>Cancel</button>
+                <button type="button" id="catalogFrameSetConfirmBtn" class="btn btn-primary">Generate</button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div id="module-marketplace" class="module-panel marketplace-module" hidden>

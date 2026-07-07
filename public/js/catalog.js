@@ -34,6 +34,9 @@
   const detailModal = document.getElementById("catalogDetailModal");
   const detailTitle = document.getElementById("catalogDetailTitle");
   const detailBody = document.getElementById("catalogDetailBody");
+  const frameSetModal = document.getElementById("catalogFrameSetModal");
+  const frameSetChoicesEl = document.getElementById("catalogFrameSetChoices");
+  const frameSetConfirmBtn = document.getElementById("catalogFrameSetConfirmBtn");
   const selectAllVisibleCheckbox = document.getElementById("catalogSelectAllVisibleCheckbox");
   const selectAllBar = document.getElementById("catalogBuilderSelectAllBar");
   const selectAllText = document.getElementById("catalogBuilderSelectAllText");
@@ -58,6 +61,8 @@
   let pythonPackagesReady = false;
   let currentPage = 1;
   let selectedIds = new Set();
+  let pendingLifestyleProductIds = [];
+  let pendingFrameSetData = null;
   let filterSelectAllActive = false;
   let showSelectAllBar = false;
   let orientationFilters = new Set();
@@ -1200,6 +1205,77 @@
     }
   }
 
+  function closeFrameSetModal() {
+    if (frameSetModal) {
+      frameSetModal.hidden = true;
+    }
+    pendingLifestyleProductIds = [];
+    pendingFrameSetData = null;
+    if (frameSetChoicesEl) {
+      frameSetChoicesEl.innerHTML = "";
+    }
+  }
+
+  function formatOrientationLabel(orientation) {
+    return formatOrientation(orientation);
+  }
+
+  function openFrameSetModal(frameSetData, productIds) {
+    if (!frameSetModal || !frameSetChoicesEl) {
+      return;
+    }
+    pendingLifestyleProductIds = productIds;
+    pendingFrameSetData = frameSetData;
+    const needsChoice = frameSetData.needsChoice || [];
+    frameSetChoicesEl.innerHTML = needsChoice
+      .map((orientation) => {
+        const sets = frameSetData.frameSets?.[orientation] || [];
+        const defaultName = frameSetData.defaults?.[orientation] || sets[0]?.name || "";
+        const options = sets
+          .map(
+            (set) =>
+              `<option value="${EditProUtils.escapeHtml(set.name)}"${
+                set.name === defaultName ? " selected" : ""
+              }>${EditProUtils.escapeHtml(set.name)} (${set.frameCount} frames)</option>`
+          )
+          .join("");
+        return `<div class="catalog-frameset-choice">
+          <label class="catalog-frameset-choice-label" for="catalogFrameSet-${EditProUtils.escapeHtml(orientation)}">${EditProUtils.escapeHtml(formatOrientationLabel(orientation))}</label>
+          <select id="catalogFrameSet-${EditProUtils.escapeHtml(orientation)}" data-orientation="${EditProUtils.escapeHtml(orientation)}">${options}</select>
+        </div>`;
+      })
+      .join("");
+    frameSetModal.hidden = false;
+  }
+
+  function collectChosenFrameSets() {
+    const chosen = { ...(pendingFrameSetData?.defaults || {}) };
+    if (!frameSetChoicesEl) {
+      return chosen;
+    }
+    for (const select of frameSetChoicesEl.querySelectorAll("select[data-orientation]")) {
+      const orientation = select.getAttribute("data-orientation");
+      if (orientation) {
+        chosen[orientation] = select.value;
+      }
+    }
+    return chosen;
+  }
+
+  async function startLifestyleGeneration(productIds, frameSets = null) {
+    if (!pythonPackagesReady) {
+      await setupPython({ silent: true });
+    }
+    const status = await EditProUtils.apiPost("/api/catalog/lifestyle/start", {
+      productIds,
+      frameTemplatesPath,
+      outputPath: lifestyleOutputPath,
+      frameSets,
+    });
+    renderLifestyleStatus(status);
+    startLifestylePolling();
+  }
+
   function closeDetail() {
     if (detailModal) {
       detailModal.hidden = true;
@@ -1239,13 +1315,17 @@
         if (!pythonPackagesReady) {
           await setupPython({ silent: true });
         }
-        const status = await EditProUtils.apiPost("/api/catalog/lifestyle/start", {
+        const frameSetData = await EditProUtils.apiPost("/api/catalog/lifestyle/frame-sets", {
           productIds,
           frameTemplatesPath,
-          outputPath: lifestyleOutputPath,
         });
-        renderLifestyleStatus(status);
-        startLifestylePolling();
+        if (frameSetData.needsChoice?.length) {
+          lifestyleBtn.disabled = false;
+          updateButtons(false);
+          openFrameSetModal(frameSetData, productIds);
+          return;
+        }
+        await startLifestyleGeneration(productIds, frameSetData.defaults || null);
       } catch (error) {
         showMessage(error.message || "Failed to start lifestyle generation.", "error");
         lifestyleBtn.disabled = false;
@@ -1253,6 +1333,33 @@
       }
     });
   }
+
+  frameSetModal?.querySelectorAll("[data-catalog-frameset-close]").forEach((el) => {
+    el.addEventListener("click", closeFrameSetModal);
+  });
+
+  frameSetConfirmBtn?.addEventListener("click", async () => {
+    const productIds = [...pendingLifestyleProductIds];
+    if (!productIds.length) {
+      closeFrameSetModal();
+      return;
+    }
+    const frameSets = collectChosenFrameSets();
+    closeFrameSetModal();
+    hideMessage();
+    if (lifestyleBtn) {
+      lifestyleBtn.disabled = true;
+    }
+    try {
+      await startLifestyleGeneration(productIds, frameSets);
+    } catch (error) {
+      showMessage(error.message || "Failed to start lifestyle generation.", "error");
+      if (lifestyleBtn) {
+        lifestyleBtn.disabled = false;
+      }
+      updateButtons(false);
+    }
+  });
 
   if (orientationBtn) {
     orientationBtn.addEventListener("click", async () => {

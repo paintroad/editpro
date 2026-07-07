@@ -2048,6 +2048,38 @@ html.dark .compliance-fail {
   background: var(--surface-muted, #f4f4f5);
 }
 
+.catalog-lifestyle-caption {
+  font-size: 0.75rem;
+}
+
+.catalog-frameset-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.catalog-frameset-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.catalog-frameset-choice-label {
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.catalog-frameset-choice select {
+  width: 100%;
+  max-width: 420px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface, #fff);
+  color: inherit;
+}
+
 .catalog-lifestyle-figure figcaption {
   margin-top: 4px;
   word-break: break-word;

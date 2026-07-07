@@ -669,9 +669,24 @@ router.post("/api/catalog/lifestyle/validate-frames", (req, res) => {
   }
 });
 
+router.post("/api/catalog/lifestyle/frame-sets", (req, res) => {
+  try {
+    const { productIds, frameTemplatesPath } = req.body || {};
+    if (!Array.isArray(productIds) || !productIds.length) {
+      return res.status(400).json({ error: "Select at least one product." });
+    }
+    const ids = productIds.map((id) => String(id || "").trim()).filter(Boolean);
+    const pathValue = frameTemplatesPath || loadCatalogStore().lifestyleSettings?.frameTemplatesPath;
+    const result = lifestyleRunner.getFrameSetsForProducts(pathValue, ids);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to list frame sets." });
+  }
+});
+
 router.post("/api/catalog/lifestyle/start", async (req, res) => {
   try {
-    const { productIds, frameTemplatesPath, outputPath } = req.body || {};
+    const { productIds, frameTemplatesPath, outputPath, frameSets } = req.body || {};
     if (!Array.isArray(productIds) || !productIds.length) {
       return res.status(400).json({ error: "Select at least one product." });
     }
@@ -680,6 +695,7 @@ router.post("/api/catalog/lifestyle/start", async (req, res) => {
       productIds: ids,
       frameTemplatesPath,
       outputPath,
+      frameSets: frameSets && typeof frameSets === "object" ? frameSets : null,
     });
     res.status(202).json(result);
   } catch (error) {

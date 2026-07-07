@@ -32,24 +32,39 @@ def is_image_file(name: str) -> bool:
     return os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS
 
 
-def detect_orientation_dirs(root: str) -> list[tuple[str, str]]:
-    """Return (orientation_label, dir_path) pairs."""
+def orientation_for_frame_set(folder_name: str) -> Optional[str]:
+    """Map a frame-set folder name to its orientation label, or None if not a frame set."""
+    key = folder_name.lower().strip()
+    if key in ORIENTATION_FOLDERS:
+        return ORIENTATION_FOLDERS[key]
+    for orient_key, label in ORIENTATION_FOLDERS.items():
+        if key.startswith(f"{orient_key} "):
+            return label
+    return None
+
+
+def detect_frame_set_dirs(root: str, only_sets: Optional[set[str]] = None) -> list[tuple[str, str, str]]:
+    """Return (frame_set_name, orientation_label, dir_path) for each frame-set subfolder."""
     entries = [
         entry.name
         for entry in os.scandir(root)
-        if entry.is_dir() and not entry.name.startswith(".")
+        if entry.is_dir() and not entry.name.startswith("_") and not entry.name.startswith(".")
     ]
-    matched = []
+    matched: list[tuple[str, str, str]] = []
     for entry_name in entries:
-        key = entry_name.lower()
-        if key in ORIENTATION_FOLDERS:
-            matched.append((ORIENTATION_FOLDERS[key], os.path.join(root, entry_name)))
+        orientation = orientation_for_frame_set(entry_name)
+        if not orientation:
+            continue
+        if only_sets is not None and entry_name not in only_sets:
+            continue
+        matched.append((entry_name, orientation, os.path.join(root, entry_name)))
+
     if matched:
-        return sorted(matched, key=lambda item: item[0])
+        return sorted(matched, key=lambda item: (item[1], item[0]))
 
     images = [name for name in os.listdir(root) if is_image_file(name) and not name.startswith(".")]
     if images:
-        return [("Landscape", root)]
+        return [("Landscape", "Landscape", root)]
     return []
 
 
@@ -105,13 +120,13 @@ def extract_green_quad(image_bgr: np.ndarray) -> tuple[np.ndarray, dict]:
     return normalized, meta
 
 
-def collect_reference_images(orientation_dirs: list[tuple[str, str]]) -> list[tuple[str, str, str]]:
-    items: list[tuple[str, str, str]] = []
-    for orientation, dir_path in orientation_dirs:
+def collect_reference_images(frame_set_dirs: list[tuple[str, str, str]]) -> list[tuple[str, str, str, str]]:
+    items: list[tuple[str, str, str, str]] = []
+    for frame_set, orientation, dir_path in frame_set_dirs:
         for filename in sorted(os.listdir(dir_path), key=lambda value: value.lower()):
             if not is_image_file(filename) or filename.startswith("."):
                 continue
-            items.append((orientation, filename, os.path.join(dir_path, filename)))
+            items.append((frame_set, orientation, filename, os.path.join(dir_path, filename)))
     return items
 
 
@@ -128,6 +143,16 @@ def main() -> int:
         default="",
         help="Optional folder for quad overlay previews",
     )
+    parser.add_argument(
+        "--merge",
+        action="store_true",
+        help="Merge extracted quads into existing output JSON instead of replacing it",
+    )
+    parser.add_argument(
+        "--sets",
+        default="",
+        help="Comma-separated frame-set folder names to process (default: all)",
+    )
     args = parser.parse_args()
 
     root = os.path.abspath(args.references_path)
@@ -135,33 +160,43 @@ def main() -> int:
         print(f"References path not found: {root}", file=sys.stderr)
         return 1
 
-    orientation_dirs = detect_orientation_dirs(root)
-    if not orientation_dirs:
+    only_sets = None
+    if args.sets.strip():
+        only_sets = {name.strip() for name in args.sets.split(",") if name.strip()}
+
+    frame_set_dirs = detect_frame_set_dirs(root, only_sets=only_sets)
+    if not frame_set_dirs:
         print(f"No reference images found under {root}", file=sys.stderr)
         return 1
 
-    payload: dict = {
-        "version": 1,
-        "sourceRoot": root,
-        "quads": {},
-    }
+    output_path = os.path.abspath(args.output)
+    payload: dict = {"version": 1, "sourceRoot": root, "quads": {}}
+    if args.merge and os.path.isfile(output_path):
+        try:
+            with open(output_path, "r", encoding="utf-8") as handle:
+                existing = json.load(handle)
+            payload["quads"] = existing.get("quads") or {}
+        except (OSError, ValueError):
+            pass
+
     errors = []
     debug_dir = os.path.abspath(args.debug_dir) if args.debug_dir else ""
     if debug_dir:
         os.makedirs(debug_dir, exist_ok=True)
 
-    for orientation, filename, image_path in collect_reference_images(orientation_dirs):
+    for frame_set, orientation, filename, image_path in collect_reference_images(frame_set_dirs):
         image_bgr = cv2.imread(image_path, cv2.IMREAD_COLOR)
         if image_bgr is None:
-            errors.append({"orientation": orientation, "frameTemplate": filename, "error": "Could not read image."})
+            errors.append({"frameSet": frame_set, "frameTemplate": filename, "error": "Could not read image."})
             continue
         try:
             normalized, meta = extract_green_quad(image_bgr)
         except ValueError as exc:
-            errors.append({"orientation": orientation, "frameTemplate": filename, "error": str(exc)})
+            errors.append({"frameSet": frame_set, "frameTemplate": filename, "error": str(exc)})
             continue
 
-        payload["quads"].setdefault(orientation, {})[filename] = {
+        meta["orientation"] = orientation
+        payload["quads"].setdefault(frame_set, {})[filename] = {
             "points": [[round(float(x), 6), round(float(y), 6)] for x, y in normalized],
             "meta": meta,
         }
@@ -173,11 +208,11 @@ def main() -> int:
             quad_px[:, 1] *= h
             stem = os.path.splitext(filename)[0].replace(" ", "_")
             overlay = draw_quad_overlay(image_bgr, quad_px)
-            cv2.imwrite(os.path.join(debug_dir, f"{orientation}_{stem}_extracted_quad.jpg"), overlay)
+            safe_set = frame_set.replace(" ", "_")
+            cv2.imwrite(os.path.join(debug_dir, f"{safe_set}_{stem}_extracted_quad.jpg"), overlay)
 
-        print(f"OK {orientation}/{filename} area={meta['areaPx']} aspect={meta['aspect']}")
+        print(f"OK {frame_set}/{filename} area={meta['areaPx']} aspect={meta['aspect']}")
 
-    output_path = os.path.abspath(args.output)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2)
@@ -188,7 +223,7 @@ def main() -> int:
     if errors:
         print(f"Errors: {len(errors)}", file=sys.stderr)
         for item in errors:
-            print(f"  {item['orientation']}/{item['frameTemplate']}: {item['error']}", file=sys.stderr)
+            print(f"  {item['frameSet']}/{item['frameTemplate']}: {item['error']}", file=sys.stderr)
         return 2
     return 0
 
