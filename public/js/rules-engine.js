@@ -476,30 +476,39 @@ window.EditProRules = {
   },
 
   catalogProductImages(product) {
-    const images = [];
-    if (product.sourceImage?.path) {
-      images.push({
-        ...product.sourceImage,
-        catalogImageKind: "source",
-        lifestyleListIndex: null,
-      });
-    }
     const lifestyle = [...(product.lifestyleImages || [])].sort(
       (a, b) => (a.index ?? 0) - (b.index ?? 0)
     );
-    for (let i = 0; i < lifestyle.length; i++) {
-      images.push({
-        ...lifestyle[i],
-        catalogImageKind: "lifestyle",
-        lifestyleListIndex: i,
-      });
+    return lifestyle.map((img, i) => ({
+      ...img,
+      catalogImageKind: "lifestyle",
+      lifestyleListIndex: i,
+      catalogGalleryIndex: i + 1,
+    }));
+  },
+
+  referenceProductImage(product) {
+    if (!product?.sourceImage?.path) {
+      return null;
     }
-    return images.map((img, i) => ({ ...img, catalogGalleryIndex: i + 1 }));
+    return {
+      ...product.sourceImage,
+      catalogImageKind: "reference",
+      lifestyleListIndex: null,
+      isReference: true,
+    };
   },
 
   collectCatalogFilenames(products) {
     const used = new Set();
     for (const product of products) {
+      const reference = this.referenceProductImage(product);
+      if (reference) {
+        const refName = reference.filename || this.basenameFromPath(reference.path);
+        if (refName) {
+          used.add(refName.toLowerCase());
+        }
+      }
       for (const img of this.catalogProductImages(product)) {
         const name = img.filename || this.basenameFromPath(img.path);
         if (name) {
@@ -510,28 +519,62 @@ window.EditProRules = {
     return used;
   },
 
-  catalogResolveRoom(product, imageEntry, imageIndex, roomFallbackCache = {}) {
-    const roomLabel = imageEntry?.roomLabel || imageEntry?.room || "";
-    if (roomLabel && !(window.EditProImageRoomMap?.isNoneRoom?.(roomLabel))) {
-      return roomLabel;
+  pickCatalogRoomFallback(seedKey, roomFallbackCache, usedRooms) {
+    if (roomFallbackCache[seedKey]) {
+      return roomFallbackCache[seedKey];
     }
-    const seedKey = `${product.productId}:${imageIndex}`;
-    if (!roomFallbackCache[seedKey]) {
-      const fallbacks = this.getRoomFallbacks();
-      const idx = fallbacks.length ? this.hashSeedKey(seedKey) % fallbacks.length : 0;
-      roomFallbackCache[seedKey] = fallbacks[idx] || "";
+    const fallbacks = this.getRoomFallbacks();
+    const start = fallbacks.length ? this.hashSeedKey(seedKey) % fallbacks.length : 0;
+    for (let i = 0; i < fallbacks.length; i++) {
+      const candidate = fallbacks[(start + i) % fallbacks.length] || "";
+      const key = candidate.toLowerCase();
+      if (candidate && !usedRooms.has(key)) {
+        roomFallbackCache[seedKey] = candidate;
+        usedRooms.add(key);
+        return candidate;
+      }
     }
-    return roomFallbackCache[seedKey];
+    const fallback = fallbacks[start] || "";
+    roomFallbackCache[seedKey] = fallback;
+    if (fallback) {
+      usedRooms.add(fallback.toLowerCase());
+    }
+    return fallback;
   },
 
-  catalogProductContext(product, imageEntry, imageIndex, shopName, roomFallbackCache = {}) {
+  catalogResolveRoom(product, imageEntry, imageIndex, roomFallbackCache = {}, usedRooms = null) {
+    const seedKey = `${product.productId}:${imageIndex}`;
+    if (roomFallbackCache[seedKey]) {
+      return roomFallbackCache[seedKey];
+    }
+    const roomsUsed = usedRooms || new Set();
+    const roomLabel = imageEntry?.roomLabel || imageEntry?.room || "";
+    if (roomLabel && !(window.EditProImageRoomMap?.isNoneRoom?.(roomLabel))) {
+      const normalized = String(roomLabel).trim();
+      const key = normalized.toLowerCase();
+      if (!roomsUsed.has(key)) {
+        roomsUsed.add(key);
+        roomFallbackCache[seedKey] = normalized;
+        return normalized;
+      }
+    }
+    return this.pickCatalogRoomFallback(seedKey, roomFallbackCache, roomsUsed);
+  },
+
+  catalogProductContext(product, imageEntry, imageIndex, shopName, roomFallbackCache = {}, usedRooms = null) {
     const description = EditProUtils.stripHtml(
       product.descriptionHtml || product.descriptionPlain || ""
     );
     const title = product.title || "";
     const productType = product.productType || "";
     const currentFilename = imageEntry?.filename || this.basenameFromPath(imageEntry?.path);
-    const room = this.catalogResolveRoom(product, imageEntry, imageIndex, roomFallbackCache);
+    const room = this.catalogResolveRoom(
+      product,
+      imageEntry,
+      imageIndex,
+      roomFallbackCache,
+      usedRooms
+    );
     return {
       title,
       handle: product.handle || "",
@@ -559,6 +602,7 @@ window.EditProRules = {
     }
     const phrases = descriptionPhrases ?? window.EditProSettings?.descriptionPhrases;
     const roomFallbackCache = {};
+    const usedRooms = new Set();
     const filenameRegistry = usedFilenames || new Set();
     const images = this.catalogProductImages(product);
     const random = {
@@ -566,7 +610,7 @@ window.EditProRules = {
       random_description: this.pickRandom(phrases),
     };
     const base = this.mergeContext(
-      this.catalogProductContext(product, images[0] || {}, 0, shopName, roomFallbackCache),
+      this.catalogProductContext(product, images[0] || {}, 0, shopName, roomFallbackCache, usedRooms),
       random
     );
 
@@ -607,7 +651,14 @@ window.EditProRules = {
       const imageIndex = imageEntry.catalogGalleryIndex;
       const currentFilename = imageEntry.filename || this.basenameFromPath(imageEntry.path);
       const ctx = this.mergeContext(
-        this.catalogProductContext(product, imageEntry, imageIndex, shopName, roomFallbackCache),
+        this.catalogProductContext(
+          product,
+          imageEntry,
+          imageIndex,
+          shopName,
+          roomFallbackCache,
+          usedRooms
+        ),
         random
       );
       const alt = this.applyTemplate(rules.imageAlt, ctx);

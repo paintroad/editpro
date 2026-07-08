@@ -357,6 +357,14 @@
                     <span class="catalog-filter-label">Lifestyle</span>
                     <div id="catalogFilterLifestyle" class="ms-dropdown"></div>
                   </label>
+                  <label class="catalog-filter-field">
+                    <span class="catalog-filter-label">SEO</span>
+                    <div id="catalogFilterSeo" class="ms-dropdown"></div>
+                  </label>
+                  <label class="catalog-filter-field">
+                    <span class="catalog-filter-label">Shopify</span>
+                    <div id="catalogFilterShopify" class="ms-dropdown"></div>
+                  </label>
                 </div>
                 <div id="catalogBuilderPagination" class="catalog-pagination" hidden>
                   <button type="button" id="catalogBuilderPrevBtn" class="catalog-page-btn">Prev</button>
@@ -382,12 +390,14 @@
                     <th>Tags</th>
                     <th>Alt (100)</th>
                     <th>Lifestyle</th>
+                    <th>SEO</th>
+                    <th>Shopify</th>
                     <th>Status</th>
                   </tr>
                 </thead>
                 <tbody id="catalogTableBody">
                   <tr class="empty-row">
-                    <td colspan="10">Import a catalog folder to list products.</td>
+                    <td colspan="12">Import a catalog folder to list products.</td>
                   </tr>
                 </tbody>
               </table>
@@ -627,7 +637,10 @@
             Create a custom app in Shopify Admin → Settings → Apps → Develop apps. Grant these
             Admin API scopes, then reinstall the app and copy the new access token:
             <code>read_products</code>, <code>write_products</code>, <code>read_content</code>,
-            <code>write_content</code>, <code>read_files</code>, <code>write_files</code>.
+            <code>write_content</code>, <code>read_files</code>, <code>write_files</code>,
+            <code>read_locations</code>, <code>write_inventory</code>,
+            <code>read_publications</code>, <code>write_publications</code>,
+            <code>read_metaobjects</code>, <code>write_metaobjects</code>.
           </p>
           <div class="settings-grid">
             <label class="field field-wide">

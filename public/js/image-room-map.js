@@ -69,7 +69,8 @@ window.EditProImageRoomMap = {
   },
 
   isNoneRoom(room) {
-    return !room || String(room).trim().toLowerCase() === "none";
+    const normalized = String(room || "").trim().toLowerCase();
+    return !normalized || normalized === "none" || normalized === "null" || normalized === "other";
   },
 
   enumerateCatalogImages(storeData) {

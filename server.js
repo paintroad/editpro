@@ -41,6 +41,7 @@ const {
   listProductSummaries,
   getProduct,
   computeLifestyleStats,
+  getPortraitImage,
 } = require("./lib/catalog-products-store");
 const { productsToCsv } = require("./lib/catalog-export");
 const { buildPreviewChanges, applyChanges } = require("./lib/catalog-seo-fix");
@@ -616,7 +617,10 @@ router.get("/api/catalog/products/:productId/image/:index", (req, res) => {
       return res.status(404).json({ error: "Product not found." });
     }
     const imageIndex = parseInt(req.params.index, 10);
-    const image = product.images?.find((img) => img.index === imageIndex);
+    let image =
+      imageIndex === 0
+        ? getPortraitImage(product)
+        : product.images?.find((img) => img.index === imageIndex);
     if (!image?.path || !fs.existsSync(image.path)) {
       return res.status(404).json({ error: "Image not found." });
     }
@@ -852,11 +856,17 @@ router.get("/api/marketplace/list", (_req, res) => {
 
 router.post("/api/marketplace/inspect", async (req, res) => {
   try {
-    const { marketplaceId, samplePath, source, outputDir, shopifyProductFilter } = req.body || {};
+    const { marketplaceId, samplePath, source, shopifyProductFilter, productHandles } = req.body || {};
     if (!marketplaceId) {
       return res.status(400).json({ error: "marketplaceId is required." });
     }
-    const result = await inspectMarketplace({ marketplaceId, samplePath, source, shopifyProductFilter });
+    const result = await inspectMarketplace({
+      marketplaceId,
+      samplePath,
+      source,
+      shopifyProductFilter,
+      productHandles,
+    });
     res.json(result);
   } catch (error) {
     res.status(400).json({ error: error.message || "Failed to inspect marketplace template." });
@@ -865,11 +875,18 @@ router.post("/api/marketplace/inspect", async (req, res) => {
 
 router.post("/api/marketplace/export", async (req, res) => {
   try {
-    const { marketplaceId, samplePath, source, outputDir, shopifyProductFilter } = req.body || {};
+    const { marketplaceId, samplePath, source, outputDir, shopifyProductFilter, productHandles } = req.body || {};
     if (!marketplaceId) {
       return res.status(400).json({ error: "marketplaceId is required." });
     }
-    const result = await exportMarketplace({ marketplaceId, samplePath, source, outputDir, shopifyProductFilter });
+    const result = await exportMarketplace({
+      marketplaceId,
+      samplePath,
+      source,
+      outputDir,
+      shopifyProductFilter,
+      productHandles,
+    });
     res.json(result);
   } catch (error) {
     res.status(400).json({ error: error.message || "Failed to export marketplace feed." });

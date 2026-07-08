@@ -20,6 +20,8 @@
   const filterShapeEl = document.getElementById("catalogFilterShape");
   const filterStatusEl = document.getElementById("catalogFilterStatus");
   const filterLifestyleEl = document.getElementById("catalogFilterLifestyle");
+  const filterSeoEl = document.getElementById("catalogFilterSeo");
+  const filterShopifyEl = document.getElementById("catalogFilterShopify");
   const jobOverlayTitle = document.getElementById("catalogJobOverlayTitle");
   const exportLink = document.getElementById("catalogExportLink");
   const countBadge = document.getElementById("catalogCountBadge");
@@ -69,6 +71,8 @@
   let shapeFilters = new Set();
   let statusFilters = new Set();
   let lifestyleFilters = new Set();
+  let seoFilters = new Set();
+  let shopifyFilters = new Set();
 
   function isEnrichEligible(row) {
     return row.status === "imported" || row.status === "error";
@@ -164,6 +168,23 @@
       ],
       onChange: onFiltersChanged,
     }),
+    seo: new MultiselectDropdown(filterSeoEl, {
+      placeholder: "Select",
+      options: [
+        { value: "done", label: "Done" },
+        { value: "pending", label: "Pending" },
+      ],
+      onChange: onFiltersChanged,
+    }),
+    shopify: new MultiselectDropdown(filterShopifyEl, {
+      placeholder: "Select",
+      options: [
+        { value: "live", label: "Live" },
+        { value: "pending", label: "Pending" },
+        { value: "error", label: "Error" },
+      ],
+      onChange: onFiltersChanged,
+    }),
   };
 
   function matchesOrientationFilter(row) {
@@ -207,11 +228,48 @@
     );
   }
 
+  function isSeoPendingEligible(row) {
+    return row.status === "enriched" && (row.lifestyleImageCount || 0) > 0 && row.seoStatus !== "fixed";
+  }
+
+  function matchesSeoFilter(row) {
+    if (!seoFilters.size) {
+      return true;
+    }
+    const done = row.seoStatus === "fixed";
+    const pending = isSeoPendingEligible(row);
+    return (done && seoFilters.has("done")) || (pending && seoFilters.has("pending"));
+  }
+
+  function isShopifyPendingEligible(row) {
+    return (
+      row.status === "enriched" &&
+      (row.lifestyleImageCount || 0) > 0 &&
+      row.shopifyStatus !== "created"
+    );
+  }
+
+  function matchesShopifyFilter(row) {
+    if (!shopifyFilters.size) {
+      return true;
+    }
+    const live = row.shopifyStatus === "created";
+    const error = row.shopifyStatus === "error";
+    const pending = isShopifyPendingEligible(row);
+    return (
+      (live && shopifyFilters.has("live")) ||
+      (pending && shopifyFilters.has("pending")) ||
+      (error && shopifyFilters.has("error"))
+    );
+  }
+
   function syncFilterStateFromUi() {
     orientationFilters = readMultiselect(filterDropdowns.orientation);
     shapeFilters = readMultiselect(filterDropdowns.shape);
     statusFilters = readMultiselect(filterDropdowns.status);
     lifestyleFilters = readMultiselect(filterDropdowns.lifestyle);
+    seoFilters = readMultiselect(filterDropdowns.seo);
+    shopifyFilters = readMultiselect(filterDropdowns.shopify);
   }
 
   function getFilteredProducts() {
@@ -220,7 +278,9 @@
         matchesOrientationFilter(row) &&
         matchesShapeFilter(row) &&
         matchesStatusFilter(row) &&
-        matchesLifestyleFilter(row)
+        matchesLifestyleFilter(row) &&
+        matchesSeoFilter(row) &&
+        matchesShopifyFilter(row)
     );
   }
 
@@ -398,6 +458,29 @@
       return "—";
     }
     return `${count} image${count === 1 ? "" : "s"}`;
+  }
+
+  function formatSeoLabel(row) {
+    if (row.seoStatus === "fixed") {
+      return '<span class="room-map-status room-map-status--mapped">Done</span>';
+    }
+    if (row.status === "enriched" && (row.lifestyleImageCount || 0) > 0) {
+      return '<span class="room-map-status room-map-status--unmapped">Pending</span>';
+    }
+    return "—";
+  }
+
+  function formatShopifyLabel(row) {
+    if (row.shopifyStatus === "created") {
+      return '<span class="room-map-status room-map-status--mapped">Live</span>';
+    }
+    if (row.shopifyStatus === "error") {
+      return '<span class="room-map-status room-map-status--error">Error</span>';
+    }
+    if (row.status === "enriched" && (row.lifestyleImageCount || 0) > 0) {
+      return '<span class="room-map-status room-map-status--unmapped">Pending</span>';
+    }
+    return "—";
   }
 
   function formatShape(shape) {
@@ -691,7 +774,7 @@
 
     if (!allTotal) {
       tableBody.innerHTML =
-        '<tr class="empty-row"><td colspan="10">Import a catalog folder to list products.</td></tr>';
+        '<tr class="empty-row"><td colspan="12">Import a catalog folder to list products.</td></tr>';
       updateHeaderCheckbox();
       renderSelectAllBar();
       return;
@@ -699,7 +782,7 @@
 
     if (!total) {
       tableBody.innerHTML =
-        '<tr class="empty-row"><td colspan="10">No products match your filters.</td></tr>';
+        '<tr class="empty-row"><td colspan="12">No products match your filters.</td></tr>';
       updateHeaderCheckbox();
       renderSelectAllBar();
       return;
@@ -734,6 +817,8 @@
           <td>${row.tagCount || 0}</td>
           <td class="catalog-col-alt" title="${EditProUtils.escapeHtml(alt)}">${EditProUtils.escapeHtml(EditProUtils.truncate(alt, 50))}</td>
           <td class="catalog-col-lifestyle">${formatLifestyleLabel(row)}</td>
+          <td class="catalog-col-seo">${formatSeoLabel(row)}</td>
+          <td class="catalog-col-shopify">${formatShopifyLabel(row)}</td>
           <td><span class="room-map-status ${statusClass}">${statusLabel(row.status)}</span></td>
         </tr>`;
       })
@@ -1183,8 +1268,8 @@
 
       detailBody.innerHTML = `
         <p class="meta">ID ${EditProUtils.escapeHtml(product.productId)} · Shape ${EditProUtils.escapeHtml(formatShape(product.shape))} · Orientation ${EditProUtils.escapeHtml(formatOrientation(product.orientation))} · ${product.variants?.length || 0} variants · ₹${minPrice}–₹${maxPrice}</p>
-        <h3 class="catalog-detail-section-title">Source painting (builder only)</h3>
-        <img class="catalog-detail-source-thumb" src="${EditProUtils.escapeHtml(thumbUrl(product.productId))}" alt="Source painting" />
+        <h3 class="catalog-detail-section-title">Reference image (not uploaded)</h3>
+        <img class="catalog-detail-source-thumb" src="${EditProUtils.escapeHtml(thumbUrl(product.productId))}" alt="Reference image" />
         <h3 class="catalog-detail-section-title">Lifestyle images (${lifestyleImages.length})</h3>
         ${product.lifestyleOutputFolder ? `<p class="meta"><strong>Output folder:</strong> ${EditProUtils.escapeHtml(product.lifestyleOutputFolder)}</p>` : ""}
         ${lifestyleGallery}

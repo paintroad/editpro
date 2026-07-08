@@ -151,7 +151,16 @@ window.EditProUtils = {
     if (value.length <= max) {
       return value;
     }
-    return `${value.slice(0, max - 1)}…`;
+    const sliced = value.slice(0, max);
+    const lastBreak = Math.max(
+      sliced.lastIndexOf(" "),
+      sliced.lastIndexOf("\t"),
+      sliced.lastIndexOf("\n")
+    );
+    if (lastBreak > 0) {
+      return sliced.slice(0, lastBreak).trimEnd();
+    }
+    return sliced.trimEnd();
   },
 
   truncateCell(text, max = 40) {
