@@ -50,6 +50,28 @@ const {
   pushProducts,
   getPushStatus,
 } = require("./lib/catalog-shopify-push");
+const {
+  scanCollectionRoot,
+  resolveUnderRoot,
+} = require("./lib/collections-scanner");
+const {
+  getCachedScan,
+  saveScanResult,
+} = require("./lib/collections-store");
+const {
+  addCollectionTagsToShopify,
+  previewCollectionTags,
+} = require("./lib/collections-shopify-tags");
+const {
+  getCollectionThumbnail,
+  getCatalogThumbnail,
+  parseThumbWidth,
+} = require("./lib/collections-image-thumb");
+const {
+  previewCollectionCreates,
+  createCollectionsOnShopify,
+  getCollectionsLiveStatus,
+} = require("./lib/collections-shopify-create");
 const roomScanRunner = require("./lib/room-scan-runner");
 const catalogEnrichRunner = require("./lib/catalog-enrich-runner");
 const lifestyleRunner = require("./lib/lifestyle-runner");
@@ -610,7 +632,7 @@ router.get("/api/catalog/products/:productId", (req, res) => {
   }
 });
 
-router.get("/api/catalog/products/:productId/image/:index", (req, res) => {
+router.get("/api/catalog/products/:productId/image/:index", async (req, res) => {
   try {
     const product = getProduct(req.params.productId);
     if (!product) {
@@ -624,13 +646,21 @@ router.get("/api/catalog/products/:productId/image/:index", (req, res) => {
     if (!image?.path || !fs.existsSync(image.path)) {
       return res.status(404).json({ error: "Image not found." });
     }
-    res.sendFile(path.resolve(image.path));
+    const filePath = path.resolve(image.path);
+    if (req.query.w != null && String(req.query.w).trim() !== "") {
+      const thumbPath = await getCatalogThumbnail(filePath, {
+        width: parseThumbWidth(req.query.w),
+      });
+      res.setHeader("Cache-Control", "private, max-age=86400");
+      return res.sendFile(thumbPath);
+    }
+    res.sendFile(filePath);
   } catch (error) {
     res.status(500).json({ error: error.message || "Failed to serve image." });
   }
 });
 
-router.get("/api/catalog/products/:productId/lifestyle/:index", (req, res) => {
+router.get("/api/catalog/products/:productId/lifestyle/:index", async (req, res) => {
   try {
     const product = getProduct(req.params.productId);
     if (!product) {
@@ -641,7 +671,15 @@ router.get("/api/catalog/products/:productId/lifestyle/:index", (req, res) => {
     if (!image?.path || !fs.existsSync(image.path)) {
       return res.status(404).json({ error: "Lifestyle image not found." });
     }
-    res.sendFile(path.resolve(image.path));
+    const filePath = path.resolve(image.path);
+    if (req.query.w != null && String(req.query.w).trim() !== "") {
+      const thumbPath = await getCatalogThumbnail(filePath, {
+        width: parseThumbWidth(req.query.w),
+      });
+      res.setHeader("Cache-Control", "private, max-age=86400");
+      return res.sendFile(thumbPath);
+    }
+    res.sendFile(filePath);
   } catch (error) {
     res.status(500).json({ error: error.message || "Failed to serve lifestyle image." });
   }
@@ -966,6 +1004,110 @@ router.get("/api/health", (_req, res) => {
   res.json({ ok: true, basePath: BASE_PATH });
 });
 
+router.get("/api/collections/data", (req, res) => {
+  try {
+    const rootPath = req.query.rootPath;
+    if (!rootPath || typeof rootPath !== "string") {
+      return res.status(400).json({ error: "Folder path is required." });
+    }
+    const cached = getCachedScan(rootPath);
+    if (!cached) {
+      return res.json({ cached: false });
+    }
+    res.json({ cached: true, ...cached });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to load cached collection data." });
+  }
+});
+
+router.post("/api/collections/scan", (req, res) => {
+  try {
+    const { rootPath } = req.body || {};
+    if (!rootPath || typeof rootPath !== "string") {
+      return res.status(400).json({ error: "Folder path is required." });
+    }
+    const result = scanCollectionRoot(rootPath);
+    saveScanResult(result);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Collection scan failed." });
+  }
+});
+
+router.get("/api/collections/shopify/live-status", async (req, res) => {
+  try {
+    const { rootPath } = req.query || {};
+    const result = await getCollectionsLiveStatus(String(rootPath || ""));
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to load collection live status." });
+  }
+});
+
+router.post("/api/collections/shopify/preview-create", async (req, res) => {
+  try {
+    const { rootPath, collections } = req.body || {};
+    const result = await previewCollectionCreates({ rootPath, collections });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to preview collection creates." });
+  }
+});
+
+router.post("/api/collections/shopify/create-collections", async (req, res) => {
+  try {
+    const { rootPath, collections } = req.body || {};
+    const result = await createCollectionsOnShopify({ rootPath, collections });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to create collections on Shopify." });
+  }
+});
+
+router.post("/api/collections/shopify/preview-tags", async (req, res) => {
+  try {
+    const { rootPath, collections } = req.body || {};
+    const result = await previewCollectionTags({ rootPath, collections });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to preview collection tags." });
+  }
+});
+
+router.post("/api/collections/shopify/add-tags", async (req, res) => {
+  try {
+    const { rootPath, collections } = req.body || {};
+    const result = await addCollectionTagsToShopify({ rootPath, collections });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to add collection tags on Shopify." });
+  }
+});
+
+router.get("/api/collections/image", async (req, res) => {
+  try {
+    const root = req.query.root;
+    const rel = req.query.rel;
+    if (!root || !rel) {
+      return res.status(400).json({ error: "root and rel are required." });
+    }
+    const filePath = resolveUnderRoot(String(root), String(rel));
+    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+      return res.status(404).json({ error: "Image not found." });
+    }
+    if (req.query.w != null && String(req.query.w).trim() !== "") {
+      const thumbPath = await getCollectionThumbnail(filePath, {
+        width: parseThumbWidth(req.query.w),
+      });
+      res.setHeader("Cache-Control", "private, max-age=86400");
+      return res.sendFile(thumbPath);
+    }
+    res.sendFile(filePath);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to load image." });
+  }
+});
+
 router.use(express.static(PUBLIC_DIR));
 router.get("/", (_req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, "index.html"));
@@ -974,6 +1116,13 @@ router.get("/", (_req, res) => {
 app.use(BASE_PATH, router);
 app.get("/", (_req, res) => {
   res.redirect(`${BASE_PATH}/`);
+});
+
+app.use((err, req, res, next) => {
+  if (err?.type === "entity.too.large") {
+    return res.status(413).json({ error: "Request too large. Try fewer collections at a time." });
+  }
+  next(err);
 });
 
 app.listen(PORT, () => {

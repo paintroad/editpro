@@ -222,14 +222,18 @@ window.EditProPreviewModal = {
           null,
           null
         );
-        if (change.previewMeta?.seoWarning) {
+        const warnHints = [
+          change.previewMeta?.missingImagesWarning,
+          change.previewMeta?.seoWarning,
+        ].filter(Boolean);
+        if (warnHints.length) {
           change.compliance = {
             applicable: true,
             status: "warn",
             pass: true,
-            ruleKey: "seoTitle",
-            ruleLabel: EditProCatalogQuality.ISSUES.seoTitle,
-            hint: change.previewMeta.seoWarning,
+            ruleKey: warnHints.length > 1 ? "ready" : change.previewMeta?.seoWarning ? "seoTitle" : "ready",
+            ruleLabel: warnHints.length > 1 ? "Ready to push" : EditProCatalogQuality.ISSUES.seoTitle,
+            hint: warnHints.join(" "),
           };
         } else {
           change.compliance = {

@@ -439,13 +439,21 @@
     }
   }
 
-  function thumbUrl(productId) {
-    return EditProUtils.apiUrl(`/api/catalog/products/${encodeURIComponent(productId)}/image/0`);
+  const THUMB_WIDTH_LIST = 160;
+  const THUMB_WIDTH_DETAIL = 360;
+  const THUMB_WIDTH_LIFESTYLE = 280;
+
+  function thumbUrl(productId, width = THUMB_WIDTH_LIST) {
+    const params = new URLSearchParams({ w: String(width) });
+    return EditProUtils.apiUrl(
+      `/api/catalog/products/${encodeURIComponent(productId)}/image/0?${params.toString()}`
+    );
   }
 
-  function lifestyleThumbUrl(productId, index) {
+  function lifestyleThumbUrl(productId, index, width = THUMB_WIDTH_LIFESTYLE) {
+    const params = new URLSearchParams({ w: String(width) });
     return EditProUtils.apiUrl(
-      `/api/catalog/products/${encodeURIComponent(productId)}/lifestyle/${index}`
+      `/api/catalog/products/${encodeURIComponent(productId)}/lifestyle/${index}?${params.toString()}`
     );
   }
 
@@ -1269,7 +1277,7 @@
       detailBody.innerHTML = `
         <p class="meta">ID ${EditProUtils.escapeHtml(product.productId)} · Shape ${EditProUtils.escapeHtml(formatShape(product.shape))} · Orientation ${EditProUtils.escapeHtml(formatOrientation(product.orientation))} · ${product.variants?.length || 0} variants · ₹${minPrice}–₹${maxPrice}</p>
         <h3 class="catalog-detail-section-title">Reference image (not uploaded)</h3>
-        <img class="catalog-detail-source-thumb" src="${EditProUtils.escapeHtml(thumbUrl(product.productId))}" alt="Reference image" />
+        <img class="catalog-detail-source-thumb" src="${EditProUtils.escapeHtml(thumbUrl(product.productId, THUMB_WIDTH_DETAIL))}" alt="Reference image" />
         <h3 class="catalog-detail-section-title">Lifestyle images (${lifestyleImages.length})</h3>
         ${product.lifestyleOutputFolder ? `<p class="meta"><strong>Output folder:</strong> ${EditProUtils.escapeHtml(product.lifestyleOutputFolder)}</p>` : ""}
         ${lifestyleGallery}

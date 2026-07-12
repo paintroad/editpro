@@ -1839,6 +1839,258 @@ html.dark .compliance-fail {
   position: relative;
 }
 
+#module-collections.module-panel,
+#module-collections.collections-module {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  gap: 0;
+  padding: 0;
+  position: relative;
+}
+
+#module-collections .card {
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+#module-collections .message.seo-toast {
+  margin: 0;
+  border-radius: 0;
+  flex-shrink: 0;
+}
+
+.collections-path-card {
+  flex-shrink: 0;
+  padding: 10px 16px;
+}
+
+.collections-list-card {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  margin-bottom: 0;
+  border-bottom: none;
+}
+
+#module-collections .collections-toolbar {
+  flex-shrink: 0;
+}
+
+#module-collections .collections-search {
+  flex: 0 0 auto;
+  width: 220px;
+  min-width: 160px;
+  max-width: 280px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  background: var(--surface);
+}
+
+.collections-split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.collections-sidebar {
+  flex: 0 0 260px;
+  min-width: 220px;
+  max-width: 320px;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--surface);
+  overflow-y: auto;
+}
+
+.collections-sidebar-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px 0;
+}
+
+.collections-sidebar-item {
+  margin: 0;
+}
+
+.collections-sidebar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.collections-sidebar-row:hover {
+  background: var(--surface-hover);
+}
+
+.collections-sidebar-item.active .collections-sidebar-row {
+  background: var(--accent-soft);
+}
+
+.collections-sidebar-check {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.collections-sidebar-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.collections-sidebar-count {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.collections-live-badge {
+  flex-shrink: 0;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #166534;
+  background: rgba(22, 163, 74, 0.12);
+  border: 1px solid rgba(22, 163, 74, 0.25);
+  border-radius: 999px;
+  padding: 2px 6px;
+  line-height: 1.2;
+}
+
+html.dark .collections-live-badge {
+  color: #86efac;
+  background: rgba(22, 163, 74, 0.18);
+  border-color: rgba(134, 239, 172, 0.25);
+}
+
+#collectionsCreatePreviewModal .modal-panel {
+  max-height: min(90vh, 900px);
+}
+
+.collections-create-preview-table td,
+.collections-create-preview-table th {
+  font-size: 0.8125rem;
+  vertical-align: top;
+}
+
+.collections-create-preview-table td:nth-child(4),
+.collections-create-preview-table td:nth-child(6) {
+  max-width: 220px;
+  word-break: break-word;
+}
+
+.collections-grid-panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.collections-grid-header {
+  flex-shrink: 0;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.collections-product-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px;
+  align-content: start;
+}
+
+.collections-grid-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.collections-grid-thumb {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  display: block;
+}
+
+.collections-grid-filename {
+  font-size: 0.75rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+
+#collectionsTagPreviewModal .modal-panel {
+  max-height: min(90vh, 900px);
+}
+
+.collections-tag-preview-table td,
+.collections-tag-preview-table th {
+  font-size: 0.8125rem;
+  vertical-align: top;
+}
+
+.collections-tag-preview-table td:nth-child(4),
+.collections-tag-preview-table td:nth-child(5) {
+  max-width: 220px;
+  word-break: break-word;
+}
+
+.collections-grid-empty {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  text-align: center;
+  padding: 48px 20px;
+}
+
 #module-roommap .card {
   border-radius: 0;
   padding: 0;

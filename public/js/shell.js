@@ -11,6 +11,7 @@
   const moduleSquare = document.getElementById("module-square");
   const moduleCatalog = document.getElementById("module-catalog");
   const moduleMarketplace = document.getElementById("module-marketplace");
+  const moduleCollections = document.getElementById("module-collections");
   const moduleRoommap = document.getElementById("module-roommap");
   const connectionModal = document.getElementById("connectionModal");
   const settingsModal = document.getElementById("settingsModal");
@@ -36,6 +37,9 @@
     }
     if (moduleMarketplace) {
       moduleMarketplace.hidden = moduleId !== "marketplace";
+    }
+    if (moduleCollections) {
+      moduleCollections.hidden = moduleId !== "collections";
     }
     if (moduleRoommap) {
       moduleRoommap.hidden = moduleId !== "roommap";

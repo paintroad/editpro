@@ -10,7 +10,7 @@ window.EditProCatalogQuality = {
   },
 
   THRESHOLDS: {
-    seoTitleMax: 60,
+    seoTitleMax: 70,
     seoTitleWarnMin: 30,
     seoDescriptionMax: 160,
     altTextWarnMax: 125,

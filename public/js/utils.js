@@ -48,6 +48,9 @@ window.EditProUtils = {
       body: JSON.stringify(body),
       signal: options.signal,
     });
+    if (response.status === 413) {
+      throw new Error("Request too large. Try fewer collections at a time.");
+    }
     const contentType = response.headers.get("content-type") || "";
     if (!contentType.includes("application/json")) {
       const text = await response.text();
