@@ -17,6 +17,28 @@ const {
   updateSyncLogEntry,
 } = require("./lib/sync-log-store");
 const { shopifyGraphql, testConnection } = require("./lib/shopify-client");
+const {
+  loadArtistsStore,
+  saveArtistsStore,
+  getArtist,
+  upsertArtist,
+  computeArtistStats,
+  stripImagesFromHtml,
+  portraitPathForSlug,
+  syncArtistPortraitsFromDisk,
+} = require("./lib/artists-store");
+const { scanFamousPainters } = require("./lib/artists-scanner");
+const { enrichArtists } = require("./lib/artists-enricher");
+const {
+  pushArtistsToShopify,
+  linkArtistsProducts,
+} = require("./lib/artists-shopify");
+const {
+  getSaleSession,
+  updateSaleSettings,
+  refreshSale,
+  revertSelected,
+} = require("./lib/sale-manager");
 const { fetchCatalog, fetchCatalogCounts } = require("./lib/catalog-fetcher");
 const {
   loadResults: loadSquareImageResults,
@@ -32,6 +54,11 @@ const {
   hasMappingForImage,
   reconcileImageRoomMap,
 } = require("./lib/image-room-store");
+const {
+  backfillRoomsFromFilenamesBatched,
+  upsertManualRooms,
+} = require("./lib/room-map-backfill");
+const { ALLOWED_ROOMS } = require("./lib/room-detector");
 const { clearCache, getCacheStats } = require("./lib/image-cache");
 const { importCatalog } = require("./lib/catalog-importer");
 const {
@@ -87,6 +114,7 @@ const {
   exportMarketplace,
   getExportFilePath,
   defaultSamplePath,
+  listMarketplaceCollections,
   DEFAULT_TEMPLATE_DIR,
 } = require("./lib/marketplace/export-service");
 
@@ -533,13 +561,20 @@ router.post("/api/image-room-map/summary", (req, res) => {
   }
 });
 
-router.post("/api/image-room-map/scan/start", async (_req, res) => {
+router.post("/api/image-room-map/scan/start", async (req, res) => {
   try {
     const status = roomScanRunner.getStatus();
     if (status.state === "running" || status.state === "paused") {
       return res.status(409).json({ error: "A room mapping job is already running.", ...status });
     }
-    const result = await roomScanRunner.start();
+    const limitRaw = req.body?.limit;
+    const limit =
+      limitRaw != null && limitRaw !== ""
+        ? Math.max(1, Math.floor(Number(limitRaw)))
+        : null;
+    const result = await roomScanRunner.start({
+      limit: Number.isFinite(limit) ? limit : null,
+    });
     res.status(202).json(result);
   } catch (error) {
     res.status(400).json({ error: error.message || "Failed to start room mapping." });
@@ -583,6 +618,45 @@ router.post("/api/image-room-map/scan", async (_req, res) => {
   res.status(410).json({
     error: "This endpoint is deprecated. Use POST /api/image-room-map/scan/start instead.",
   });
+});
+
+router.get("/api/image-room-map/rooms", (_req, res) => {
+  try {
+    res.json({ rooms: ALLOWED_ROOMS.filter((r) => r !== "other") });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to list rooms." });
+  }
+});
+
+router.post("/api/image-room-map/backfill-filename", async (_req, res) => {
+  try {
+    // Page-batched catalog fetch + backfill; do not return full mappings (huge).
+    const result = await backfillRoomsFromFilenamesBatched();
+    res.json(result);
+  } catch (error) {
+    res
+      .status(400)
+      .json({ error: error.message || "Failed to backfill rooms from filenames." });
+  }
+});
+
+router.post("/api/image-room-map/upsert", (req, res) => {
+  try {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!items.length) {
+      return res.status(400).json({ error: "items array is required." });
+    }
+    const result = upsertManualRooms(items);
+    const store = loadImageRoomMap();
+    res.json({
+      ...result,
+      mappings: store.mappings,
+      count: Object.keys(store.mappings).length,
+      updatedAt: store.updatedAt,
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to upsert room mappings." });
+  }
 });
 
 router.get("/api/openai/status", (_req, res) => {
@@ -882,6 +956,7 @@ router.get("/api/marketplace/list", (_req, res) => {
     const marketplaces = listMarketplaces().map((marketplace) => ({
       ...marketplace,
       defaultSamplePath: defaultSamplePath(getMarketplace(marketplace.id)),
+      usesSampleTemplate: Boolean(getMarketplace(marketplace.id).defaultSampleName),
     }));
     res.json({
       marketplaces,
@@ -892,11 +967,30 @@ router.get("/api/marketplace/list", (_req, res) => {
   }
 });
 
+router.get("/api/marketplace/collections", async (_req, res) => {
+  try {
+    const result = await listMarketplaceCollections();
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to list Shopify collections." });
+  }
+});
+
 router.post("/api/marketplace/inspect", async (req, res) => {
   try {
-    const { marketplaceId, samplePath, source, shopifyProductFilter, productHandles } = req.body || {};
+    const {
+      marketplaceId,
+      samplePath,
+      source,
+      shopifyProductFilter,
+      productHandles,
+      collectionHandles,
+    } = req.body || {};
     if (!marketplaceId) {
       return res.status(400).json({ error: "marketplaceId is required." });
+    }
+    if (source === "collections" && !(Array.isArray(collectionHandles) && collectionHandles.length)) {
+      return res.status(400).json({ error: "Select at least one collection." });
     }
     const result = await inspectMarketplace({
       marketplaceId,
@@ -904,6 +998,7 @@ router.post("/api/marketplace/inspect", async (req, res) => {
       source,
       shopifyProductFilter,
       productHandles,
+      collectionHandles,
     });
     res.json(result);
   } catch (error) {
@@ -913,9 +1008,20 @@ router.post("/api/marketplace/inspect", async (req, res) => {
 
 router.post("/api/marketplace/export", async (req, res) => {
   try {
-    const { marketplaceId, samplePath, source, outputDir, shopifyProductFilter, productHandles } = req.body || {};
+    const {
+      marketplaceId,
+      samplePath,
+      source,
+      outputDir,
+      shopifyProductFilter,
+      productHandles,
+      collectionHandles,
+    } = req.body || {};
     if (!marketplaceId) {
       return res.status(400).json({ error: "marketplaceId is required." });
+    }
+    if (source === "collections" && !(Array.isArray(collectionHandles) && collectionHandles.length)) {
+      return res.status(400).json({ error: "Select at least one collection." });
     }
     const result = await exportMarketplace({
       marketplaceId,
@@ -924,6 +1030,7 @@ router.post("/api/marketplace/export", async (req, res) => {
       outputDir,
       shopifyProductFilter,
       productHandles,
+      collectionHandles,
     });
     res.json(result);
   } catch (error) {
@@ -1108,6 +1215,185 @@ router.get("/api/collections/image", async (req, res) => {
   }
 });
 
+router.get("/api/artists", (_req, res) => {
+  try {
+    const store = syncArtistPortraitsFromDisk();
+    res.json({ store, stats: computeArtistStats(store) });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to load artists." });
+  }
+});
+
+router.post("/api/artists/scan", (req, res) => {
+  try {
+    const sourcePath = req.body?.sourcePath;
+    const store = scanFamousPainters(sourcePath);
+    res.json({ store, stats: computeArtistStats(store) });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to scan artists." });
+  }
+});
+
+router.put("/api/artists/:id", (req, res) => {
+  try {
+    const store = loadArtistsStore();
+    const artist = getArtist(store, req.params.id);
+    if (!artist) {
+      return res.status(404).json({ error: "Artist not found." });
+    }
+    const body = req.body || {};
+    const next = { ...artist };
+    if (body.biographyHtml != null) {
+      next.biographyHtml = stripImagesFromHtml(body.biographyHtml);
+      next.biographyEditedAt = new Date().toISOString();
+      if (next.enrichStatus === "pending" && next.biographyHtml) {
+        next.enrichStatus = "enriched";
+      }
+    }
+    if (body.name != null && String(body.name).trim()) {
+      next.name = String(body.name).trim();
+    }
+    if (body.wikipediaUrl != null) {
+      next.wikipediaUrl = String(body.wikipediaUrl).trim();
+    }
+    upsertArtist(store, next);
+    saveArtistsStore(store);
+    res.json({ artist: next, store, stats: computeArtistStats(store) });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to update artist." });
+  }
+});
+
+router.get("/api/artists/:id/image", (req, res) => {
+  try {
+    const store = loadArtistsStore();
+    const artist = getArtist(store, req.params.id);
+    if (!artist) {
+      return res.status(404).json({ error: "Artist not found." });
+    }
+    const filePath =
+      (artist.imageLocalPath && fs.existsSync(artist.imageLocalPath)
+        ? artist.imageLocalPath
+        : null) ||
+      (fs.existsSync(portraitPathForSlug(artist.id))
+        ? portraitPathForSlug(artist.id)
+        : null);
+    if (!filePath) {
+      return res.status(404).json({ error: "Portrait not found." });
+    }
+    res.setHeader("Cache-Control", "private, max-age=60");
+    res.sendFile(path.resolve(filePath));
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to load portrait." });
+  }
+});
+
+router.post("/api/artists/enrich", async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+    if (!ids.length) {
+      return res.status(400).json({ error: "ids array is required." });
+    }
+    const result = await enrichArtists(ids);
+    res.json({
+      ...result,
+      stats: computeArtistStats(result.store),
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to enrich artists." });
+  }
+});
+
+router.post("/api/artists/shopify-push", async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+    if (!ids.length) {
+      return res.status(400).json({ error: "ids array is required." });
+    }
+    const result = await pushArtistsToShopify(ids);
+    res.json({
+      ...result,
+      stats: computeArtistStats(result.store),
+    });
+  } catch (error) {
+    res
+      .status(400)
+      .json({ error: error.message || "Failed to push artists to Shopify." });
+  }
+});
+
+router.post("/api/artists/link-products", async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+    if (!ids.length) {
+      return res.status(400).json({ error: "ids array is required." });
+    }
+    const limit = req.body?.limit != null ? Number(req.body.limit) : undefined;
+    const productIds = Array.isArray(req.body?.productIds)
+      ? req.body.productIds.map(String)
+      : undefined;
+    const result = await linkArtistsProducts(ids, { limit, productIds });
+    res.json({
+      ...result,
+      stats: computeArtistStats(result.store),
+    });
+  } catch (error) {
+    res
+      .status(400)
+      .json({ error: error.message || "Failed to link artist products." });
+  }
+});
+
+router.get("/api/sale", (_req, res) => {
+  try {
+    res.json(getSaleSession());
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to load sale session." });
+  }
+});
+
+router.put("/api/sale/settings", (req, res) => {
+  try {
+    const result = updateSaleSettings({
+      discountMin: req.body?.discountMin,
+      discountMax: req.body?.discountMax,
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to update sale settings." });
+  }
+});
+
+router.post("/api/sale/refresh", async (req, res) => {
+  try {
+    const result = await refreshSale({
+      discountMin: req.body?.discountMin,
+      discountMax: req.body?.discountMax,
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to refresh sale." });
+  }
+});
+
+router.post("/api/sale/revert", async (req, res) => {
+  try {
+    const variantIds = Array.isArray(req.body?.variantIds)
+      ? req.body.variantIds.map(String)
+      : [];
+    const productIds = Array.isArray(req.body?.productIds)
+      ? req.body.productIds.map(String)
+      : [];
+    if (!variantIds.length && !productIds.length) {
+      return res.status(400).json({ error: "variantIds or productIds required." });
+    }
+    const result = await revertSelected({ variantIds, productIds });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to revert sale items." });
+  }
+});
+
 router.use(express.static(PUBLIC_DIR));
 router.get("/", (_req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, "index.html"));
@@ -1120,7 +1406,9 @@ app.get("/", (_req, res) => {
 
 app.use((err, req, res, next) => {
   if (err?.type === "entity.too.large") {
-    return res.status(413).json({ error: "Request too large. Try fewer collections at a time." });
+    return res.status(413).json({
+      error: "Request too large. Try a smaller selection, or use Room Map backfill (server-side catalog fetch).",
+    });
   }
   next(err);
 });

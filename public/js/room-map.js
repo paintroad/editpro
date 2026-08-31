@@ -7,6 +7,7 @@
   const openAiConcurrencyInput = document.getElementById("roomMapOpenAiConcurrency");
   const saveOpenAiBtn = document.getElementById("roomMapSaveOpenAiBtn");
   const mapBtn = document.getElementById("roomMapScanBtn");
+  const backfillBtn = document.getElementById("roomMapBackfillBtn");
   const searchInput = document.getElementById("roomMapSearch");
   const sortSelect = document.getElementById("roomMapSort");
   const filterBar = document.querySelector("#module-roommap .room-map-filter-bar");
@@ -20,6 +21,10 @@
   const tableWrap = document.getElementById("roomMapTableWrap");
   const openAiStatusBadge = document.getElementById("roomMapOpenAiStatusBadge");
   const openAiStatusText = document.getElementById("roomMapOpenAiStatusText");
+  const selectAllEl = document.getElementById("roomMapSelectAll");
+  const assignRoomEl = document.getElementById("roomMapAssignRoom");
+  const assignBtn = document.getElementById("roomMapAssignBtn");
+  const selectionMeta = document.getElementById("roomMapSelectionMeta");
 
   let jobActive = false;
   let summary = null;
@@ -28,6 +33,8 @@
   const PAGE_SIZE = 50;
   let currentPage = 1;
   let mapFilter = "all";
+  const selectedIds = new Set();
+  let roomsLoaded = false;
 
   function getStoreData() {
     return window.EditProLive?.getStoreData?.() || {
@@ -152,6 +159,9 @@
   }
 
   function updateMapButton() {
+    if (backfillBtn) {
+      backfillBtn.disabled = !hasCatalog() || jobActive;
+    }
     if (!mapBtn || !summary) {
       return;
     }
@@ -169,6 +179,49 @@
       summary.unmapped > 0
         ? `Map unmapped images (${formatNumber(summary.unmapped)})`
         : "All lifestyle images mapped";
+  }
+
+  function rowKey(row) {
+    return row.fileId || `${row.resourceType}:${row.handle}:${row.imageIndex}`;
+  }
+
+  function updateSelectionMeta() {
+    const n = selectedIds.size;
+    if (selectionMeta) {
+      selectionMeta.textContent = `${n} selected`;
+    }
+    if (assignBtn) {
+      assignBtn.disabled = n === 0 || !(assignRoomEl?.value || "").trim() || jobActive;
+    }
+    const { items } = getVisiblePage();
+    if (selectAllEl) {
+      const keys = items.map(rowKey);
+      const allSelected = keys.length > 0 && keys.every((k) => selectedIds.has(k));
+      const someSelected = keys.some((k) => selectedIds.has(k));
+      selectAllEl.checked = allSelected;
+      selectAllEl.indeterminate = someSelected && !allSelected;
+    }
+  }
+
+  async function ensureRoomsSelect() {
+    if (!assignRoomEl || roomsLoaded) return;
+    try {
+      const rooms = await EditProImageRoomMap.loadRooms();
+      const options = ['<option value="">Choose room…</option>']
+        .concat(
+          rooms.map(
+            (r) =>
+              `<option value="${EditProUtils.escapeHtml(r)}">${EditProUtils.escapeHtml(
+                EditProImageRoomMap.roomToTitleCase(r)
+              )}</option>`
+          )
+        )
+        .concat(['<option value="none">None (base / no room)</option>']);
+      assignRoomEl.innerHTML = options.join("");
+      roomsLoaded = true;
+    } catch {
+      // ignore until server ready
+    }
   }
 
   async function refreshOpenAiStatus() {
@@ -335,10 +388,15 @@
   }
 
   function renderRowHtml(row) {
+    const key = rowKey(row);
+    const checked = selectedIds.has(key) ? "checked" : "";
     const roomLabel = row.mapped ? EditProImageRoomMap.roomToTitleCase(row.room) : "—";
     const statusClass = row.mapped ? "room-map-status--mapped" : "room-map-status--unmapped";
     const statusText = row.mapped ? "Mapped" : "Unmapped";
-    return `<tr>
+    return `<tr data-row-key="${EditProUtils.escapeHtml(key)}">
+      <td class="room-map-col-check">
+        <input type="checkbox" class="room-map-row-check" data-row-key="${EditProUtils.escapeHtml(key)}" ${checked} />
+      </td>
       <td class="room-map-col-image">
         <img class="room-map-thumb" src="${EditProUtils.escapeHtml(row.url)}" alt="" loading="lazy" />
       </td>
@@ -363,10 +421,12 @@
     updatePagination(total, page, totalPages);
     if (!items.length) {
       tableBody.innerHTML =
-        '<tr class="empty-row"><td colspan="5">No images match your filters.</td></tr>';
+        '<tr class="empty-row"><td colspan="6">No images match your filters.</td></tr>';
+      updateSelectionMeta();
       return;
     }
     tableBody.innerHTML = items.map(renderRowHtml).join("");
+    updateSelectionMeta();
   }
 
   function renderTableThrottled() {
@@ -454,6 +514,7 @@
   async function refresh() {
     applyOpenAiFields();
     await refreshOpenAiStatus();
+    await ensureRoomsSelect();
     const connected = window.EditProSettings?.connected;
     const catalog = hasCatalog();
 
@@ -468,6 +529,9 @@
       if (mapBtn) {
         mapBtn.disabled = true;
       }
+      if (backfillBtn) {
+        backfillBtn.disabled = true;
+      }
       return;
     }
 
@@ -481,6 +545,9 @@
       }
       if (mapBtn) {
         mapBtn.disabled = true;
+      }
+      if (backfillBtn) {
+        backfillBtn.disabled = true;
       }
       return;
     }
@@ -543,6 +610,75 @@
     }
   }
 
+  async function runBackfill() {
+    if (!hasCatalog() || jobActive) return;
+    EditProUtils.hideMessage(messageEl);
+    if (backfillBtn) {
+      backfillBtn.disabled = true;
+      backfillBtn.textContent = "Fetching catalog…";
+    }
+    try {
+      const result = await EditProImageRoomMap.backfillFromFilenames();
+      selectedIds.clear();
+      summary = EditProImageRoomMap.getSummary(getStoreData());
+      renderCoverage();
+      renderTableNow();
+      EditProUtils.showMessage(
+        messageEl,
+        `Backfill done — ${formatNumber(result.portraitsSet || 0)} portraits set to none, ${formatNumber(result.filledFromFilename || 0)} filled from filenames, ${formatNumber(result.stillUnmapped || 0)} still unmapped.`,
+        "success"
+      );
+    } catch (error) {
+      EditProUtils.showMessage(messageEl, error.message, "error");
+    } finally {
+      if (backfillBtn) {
+        backfillBtn.textContent = "Backfill from filenames";
+      }
+      updateMapButton();
+    }
+  }
+
+  async function runAssign() {
+    const room = (assignRoomEl?.value || "").trim();
+    if (!room || !selectedIds.size) return;
+    const byKey = new Map((summary?.rows || []).map((r) => [rowKey(r), r]));
+    const items = [];
+    for (const key of selectedIds) {
+      const row = byKey.get(key);
+      if (!row) continue;
+      items.push({
+        fileId: row.fileId,
+        handle: row.handle,
+        resourceType: row.resourceType,
+        resourceId: row.resourceId,
+        resourceTitle: row.resourceTitle,
+        imageIndex: row.imageIndex,
+        url: row.url,
+        room,
+      });
+    }
+    if (!items.length) return;
+    EditProUtils.hideMessage(messageEl);
+    if (assignBtn) assignBtn.disabled = true;
+    try {
+      const result = await EditProImageRoomMap.upsertRooms(items);
+      selectedIds.clear();
+      summary = EditProImageRoomMap.getSummary(getStoreData());
+      renderCoverage();
+      renderTableNow();
+      EditProUtils.showMessage(
+        messageEl,
+        `Assigned room to ${formatNumber(result.updated || 0)} image${(result.updated || 0) === 1 ? "" : "s"}.`,
+        "success"
+      );
+    } catch (error) {
+      EditProUtils.showMessage(messageEl, error.message, "error");
+    } finally {
+      updateSelectionMeta();
+      updateMapButton();
+    }
+  }
+
   function resetPageAndRender() {
     currentPage = 1;
     renderTableNow();
@@ -581,6 +717,28 @@
 
   saveOpenAiBtn?.addEventListener("click", saveOpenAiSettings);
   mapBtn?.addEventListener("click", handleMapClick);
+  backfillBtn?.addEventListener("click", runBackfill);
+  assignBtn?.addEventListener("click", runAssign);
+  assignRoomEl?.addEventListener("change", updateSelectionMeta);
+  selectAllEl?.addEventListener("change", () => {
+    const { items } = getVisiblePage();
+    if (selectAllEl.checked) {
+      items.forEach((r) => selectedIds.add(rowKey(r)));
+    } else {
+      items.forEach((r) => selectedIds.delete(rowKey(r)));
+    }
+    renderTableNow();
+  });
+  tableBody?.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    if (!target.classList.contains("room-map-row-check")) return;
+    const key = target.dataset.rowKey;
+    if (!key) return;
+    if (target.checked) selectedIds.add(key);
+    else selectedIds.delete(key);
+    updateSelectionMeta();
+  });
   searchInput?.addEventListener("input", resetPageAndRender);
   sortSelect?.addEventListener("change", resetPageAndRender);
 

@@ -47,7 +47,8 @@ async function main() {
 
   const opts = { ...loadConfig().roomDetection, openaiApiKey: getOpenAiApiKey() };
   const started = Date.now();
-  const room = await detectRoomFromImageUrl(target.url, opts);
+  const detected = await detectRoomFromImageUrl(target.url, opts);
+  const room = typeof detected === "object" ? detected.room : detected;
   const elapsed = ((Date.now() - started) / 1000).toFixed(1);
 
   upsertMapping(target, {
@@ -57,6 +58,9 @@ async function main() {
 
   const saved = getMappingForImage(target);
   console.log(`\nResult: ${room}`);
+  if (detected?.usage) {
+    console.log(`Usage: ${JSON.stringify(detected.usage)}`);
+  }
   console.log(`OpenAI call took ${elapsed}s`);
   console.log(`Saved under slot key: ${saved ? "yes" : "no"}`);
   console.log(`Source: ${saved?.source || "n/a"}`);

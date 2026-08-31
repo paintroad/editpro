@@ -57,8 +57,7 @@
           "areaPx": 99151,
           "aspect": 1.4335,
           "method": "hull",
-          "rawCount": 2552,
-          "maskCount": 2560
+          "orientation": "Landscape"
         }
       },
       "3. Hallway.jpg": {
@@ -86,8 +85,7 @@
           "areaPx": 217800,
           "aspect": 1.3889,
           "method": "hull",
-          "rawCount": 3776,
-          "maskCount": 3784
+          "orientation": "Landscape"
         }
       },
       "4. Dining.jpg": {
@@ -115,8 +113,7 @@
           "areaPx": 163688,
           "aspect": 1.2258,
           "method": "hull",
-          "rawCount": 2721,
-          "maskCount": 2731
+          "orientation": "Landscape"
         }
       },
       "5. Hall.jpg": {
@@ -144,8 +141,7 @@
           "areaPx": 109415,
           "aspect": 1.426,
           "method": "hull",
-          "rawCount": 2680,
-          "maskCount": 2688
+          "orientation": "Landscape"
         }
       },
       "6. Family Room.jpg": {
@@ -173,8 +169,7 @@
           "areaPx": 218476,
           "aspect": 1.4663,
           "method": "hull",
-          "rawCount": 3800,
-          "maskCount": 3808
+          "orientation": "Landscape"
         }
       },
       "7. Foyer.jpg": {
@@ -202,8 +197,7 @@
           "areaPx": 134994,
           "aspect": 1.4801,
           "method": "hull",
-          "rawCount": 2988,
-          "maskCount": 2996
+          "orientation": "Landscape"
         }
       },
       "8. Veranda.jpg": {
@@ -231,8 +225,7 @@
           "areaPx": 155568,
           "aspect": 1.378,
           "method": "hull",
-          "rawCount": 3188,
-          "maskCount": 3196
+          "orientation": "Landscape"
         }
       },
       "9. Sitting Area.jpg": {
@@ -260,8 +253,91 @@
           "areaPx": 191807,
           "aspect": 1.3935,
           "method": "hull",
-          "rawCount": 3544,
-          "maskCount": 3552
+          "orientation": "Landscape"
+        }
+      },
+      "1. Base Landscape Black.jpg": {
+        "points": [
+          [
+            0.086111,
+            0.181481
+          ],
+          [
+            0.907407,
+            0.181481
+          ],
+          [
+            0.907407,
+            0.814815
+          ],
+          [
+            0.086111,
+            0.814815
+          ]
+        ],
+        "meta": {
+          "width": 1080,
+          "height": 1080,
+          "areaPx": 606708,
+          "aspect": 1.2968,
+          "method": "hull",
+          "orientation": "Landscape"
+        }
+      },
+      "1. Base Landscape White.jpg": {
+        "points": [
+          [
+            0.086111,
+            0.181481
+          ],
+          [
+            0.907407,
+            0.181481
+          ],
+          [
+            0.907407,
+            0.814815
+          ],
+          [
+            0.086111,
+            0.814815
+          ]
+        ],
+        "meta": {
+          "width": 1080,
+          "height": 1080,
+          "areaPx": 606708,
+          "aspect": 1.2968,
+          "method": "hull",
+          "orientation": "Landscape"
+        }
+      },
+      "1. Base Landscape Wooden.jpg": {
+        "points": [
+          [
+            0.086111,
+            0.181481
+          ],
+          [
+            0.907407,
+            0.181481
+          ],
+          [
+            0.907407,
+            0.814815
+          ],
+          [
+            0.086111,
+            0.814815
+          ]
+        ],
+        "meta": {
+          "width": 1080,
+          "height": 1080,
+          "areaPx": 606708,
+          "aspect": 1.2968,
+          "method": "hull",
+          "orientation": "Landscape"
         }
       }
     },
@@ -320,8 +396,7 @@
           "areaPx": 186238,
           "aspect": 1.3103,
           "method": "hull",
-          "rawCount": 3476,
-          "maskCount": 3484
+          "orientation": "Portrait"
         }
       },
       "11. Kitchen.jpg": {
@@ -349,8 +424,7 @@
           "areaPx": 182336,
           "aspect": 1.4716,
           "method": "hull",
-          "rawCount": 3472,
-          "maskCount": 3480
+          "orientation": "Portrait"
         }
       },
       "12. Extra Kitchen.jpg": {
@@ -378,8 +452,7 @@
           "areaPx": 121002,
           "aspect": 1.3355,
           "method": "hull",
-          "rawCount": 2804,
-          "maskCount": 2812
+          "orientation": "Portrait"
         }
       },
       "2. Entrance.jpg": {
@@ -407,8 +480,7 @@
           "areaPx": 140805,
           "aspect": 1.419,
           "method": "hull",
-          "rawCount": 3040,
-          "maskCount": 3048
+          "orientation": "Portrait"
         }
       },
       "3. Sitting Area.jpg": {
@@ -436,8 +508,7 @@
           "areaPx": 178536,
           "aspect": 1.4913,
           "method": "hull",
-          "rawCount": 3440,
-          "maskCount": 3448
+          "orientation": "Portrait"
         }
       },
       "4. Living Room.jpg": {
@@ -465,8 +536,7 @@
           "areaPx": 56380,
           "aspect": 1.7433,
           "method": "hull",
-          "rawCount": 1439,
-          "maskCount": 1446
+          "orientation": "Portrait"
         }
       },
       "5. Living Room.jpg": {
@@ -494,8 +564,7 @@
           "areaPx": 89154,
           "aspect": 1.6581,
           "method": "hull",
-          "rawCount": 2261,
-          "maskCount": 2269
+          "orientation": "Portrait"
         }
       },
       "6. Hall.jpg": {
@@ -523,8 +592,7 @@
           "areaPx": 91512,
           "aspect": 1.5122,
           "method": "hull",
-          "rawCount": 2464,
-          "maskCount": 2472
+          "orientation": "Portrait"
         }
       },
       "7. Bedroom.jpg": {
@@ -552,8 +620,7 @@
           "areaPx": 63273,
           "aspect": 1.6207,
           "method": "hull",
-          "rawCount": 1624,
-          "maskCount": 1633
+          "orientation": "Portrait"
         }
       },
       "8. Bedroom.jpg": {
@@ -581,8 +648,7 @@
           "areaPx": 118152,
           "aspect": 1.5159,
           "method": "hull",
-          "rawCount": 2623,
-          "maskCount": 2629
+          "orientation": "Portrait"
         }
       },
       "9. Bathroom.jpg": {
@@ -610,8 +676,91 @@
           "areaPx": 122304,
           "aspect": 1.415,
           "method": "hull",
-          "rawCount": 2832,
-          "maskCount": 2840
+          "orientation": "Portrait"
+        }
+      },
+      "1. Base Portrait Black.jpg": {
+        "points": [
+          [
+            0.17963,
+            0.080556
+          ],
+          [
+            0.82037,
+            0.080556
+          ],
+          [
+            0.82037,
+            0.917593
+          ],
+          [
+            0.17963,
+            0.917593
+          ]
+        ],
+        "meta": {
+          "width": 1080,
+          "height": 1080,
+          "areaPx": 625568,
+          "aspect": 1.3064,
+          "method": "hull",
+          "orientation": "Portrait"
+        }
+      },
+      "1. Base Portrait White.jpg": {
+        "points": [
+          [
+            0.17963,
+            0.080556
+          ],
+          [
+            0.82037,
+            0.080556
+          ],
+          [
+            0.82037,
+            0.917593
+          ],
+          [
+            0.17963,
+            0.917593
+          ]
+        ],
+        "meta": {
+          "width": 1080,
+          "height": 1080,
+          "areaPx": 625568,
+          "aspect": 1.3064,
+          "method": "hull",
+          "orientation": "Portrait"
+        }
+      },
+      "1. Base Portrait Wooden.jpg": {
+        "points": [
+          [
+            0.17963,
+            0.080556
+          ],
+          [
+            0.82037,
+            0.080556
+          ],
+          [
+            0.82037,
+            0.917593
+          ],
+          [
+            0.17963,
+            0.917593
+          ]
+        ],
+        "meta": {
+          "width": 1080,
+          "height": 1080,
+          "areaPx": 625568,
+          "aspect": 1.3064,
+          "method": "hull",
+          "orientation": "Portrait"
         }
       }
     },
@@ -670,8 +819,7 @@
           "areaPx": 52400,
           "aspect": 1.38,
           "method": "hull",
-          "rawCount": 1400,
-          "maskCount": 1407
+          "orientation": "Square"
         }
       },
       "3. Hall.jpg": {
@@ -699,8 +847,7 @@
           "areaPx": 201345,
           "aspect": 1.0739,
           "method": "hull",
-          "rawCount": 3584,
-          "maskCount": 3592
+          "orientation": "Square"
         }
       },
       "4. Bedroom.jpg": {
@@ -728,8 +875,7 @@
           "areaPx": 176610,
           "aspect": 1.0714,
           "method": "hull",
-          "rawCount": 3356,
-          "maskCount": 3364
+          "orientation": "Square"
         }
       },
       "5. Sitting Area.jpg": {
@@ -757,8 +903,7 @@
           "areaPx": 156780,
           "aspect": 1.0308,
           "method": "hull",
-          "rawCount": 3160,
-          "maskCount": 3168
+          "orientation": "Square"
         }
       },
       "6. Family Room.jpg": {
@@ -786,8 +931,91 @@
           "areaPx": 43802,
           "aspect": 1.3661,
           "method": "hull",
-          "rawCount": 1349,
-          "maskCount": 1357
+          "orientation": "Square"
+        }
+      },
+      "1. Base Square Black.jpg": {
+        "points": [
+          [
+            0.112963,
+            0.111111
+          ],
+          [
+            0.887037,
+            0.111111
+          ],
+          [
+            0.887037,
+            0.891667
+          ],
+          [
+            0.112963,
+            0.891667
+          ]
+        ],
+        "meta": {
+          "width": 1080,
+          "height": 1080,
+          "areaPx": 704748,
+          "aspect": 1.0084,
+          "method": "hull",
+          "orientation": "Square"
+        }
+      },
+      "1. Base Square White.jpg": {
+        "points": [
+          [
+            0.112963,
+            0.111111
+          ],
+          [
+            0.887037,
+            0.111111
+          ],
+          [
+            0.887037,
+            0.891667
+          ],
+          [
+            0.112963,
+            0.891667
+          ]
+        ],
+        "meta": {
+          "width": 1080,
+          "height": 1080,
+          "areaPx": 704748,
+          "aspect": 1.0084,
+          "method": "hull",
+          "orientation": "Square"
+        }
+      },
+      "1. Base Square Wooden.jpg": {
+        "points": [
+          [
+            0.112963,
+            0.111111
+          ],
+          [
+            0.887037,
+            0.111111
+          ],
+          [
+            0.887037,
+            0.891667
+          ],
+          [
+            0.112963,
+            0.891667
+          ]
+        ],
+        "meta": {
+          "width": 1080,
+          "height": 1080,
+          "areaPx": 704748,
+          "aspect": 1.0084,
+          "method": "hull",
+          "orientation": "Square"
         }
       }
     },
@@ -1068,6 +1296,90 @@
           "height": 1080,
           "areaPx": 100360,
           "aspect": 1.4846,
+          "method": "hull",
+          "orientation": "Portrait"
+        }
+      },
+      "1. Base Portrait Black.jpg": {
+        "points": [
+          [
+            0.17963,
+            0.080556
+          ],
+          [
+            0.82037,
+            0.080556
+          ],
+          [
+            0.82037,
+            0.917593
+          ],
+          [
+            0.17963,
+            0.917593
+          ]
+        ],
+        "meta": {
+          "width": 1080,
+          "height": 1080,
+          "areaPx": 625568,
+          "aspect": 1.3064,
+          "method": "hull",
+          "orientation": "Portrait"
+        }
+      },
+      "1. Base Portrait White.jpg": {
+        "points": [
+          [
+            0.17963,
+            0.080556
+          ],
+          [
+            0.82037,
+            0.080556
+          ],
+          [
+            0.82037,
+            0.917593
+          ],
+          [
+            0.17963,
+            0.917593
+          ]
+        ],
+        "meta": {
+          "width": 1080,
+          "height": 1080,
+          "areaPx": 625568,
+          "aspect": 1.3064,
+          "method": "hull",
+          "orientation": "Portrait"
+        }
+      },
+      "1. Base Portrait Wooden.jpg": {
+        "points": [
+          [
+            0.17963,
+            0.080556
+          ],
+          [
+            0.82037,
+            0.080556
+          ],
+          [
+            0.82037,
+            0.917593
+          ],
+          [
+            0.17963,
+            0.917593
+          ]
+        ],
+        "meta": {
+          "width": 1080,
+          "height": 1080,
+          "areaPx": 625568,
+          "aspect": 1.3064,
           "method": "hull",
           "orientation": "Portrait"
         }

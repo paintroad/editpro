@@ -1053,7 +1053,14 @@ def generate_for_product(
         orientation = entry.get("orientation")
         frame_set = entry.get("frameSet") or entry.get("frame_set")
         room = entry.get("room")
-        filename = f"{output_base_name}_{output_index}.jpg"
+        frame_colour = entry.get("frameColour") or entry.get("frame_colour")
+        output_suffix = entry.get("outputSuffix") or entry.get("output_suffix")
+        if not output_suffix and frame_colour:
+            output_suffix = str(frame_colour).strip().lower()
+        if output_suffix:
+            filename = f"{output_base_name}_{output_index}_{output_suffix}.jpg"
+        else:
+            filename = f"{output_base_name}_{output_index}.jpg"
         output_path = os.path.join(output_dir, filename)
         try:
             result = composite_painting_into_frame(
@@ -1082,6 +1089,8 @@ def generate_for_product(
             room_label = entry.get("roomLabel") or entry.get("room_label")
             if room_label is not None:
                 image_record["roomLabel"] = room_label
+            if frame_colour:
+                image_record["frameColour"] = frame_colour
             images.append(image_record)
         except Exception as exc:  # noqa: BLE001
             errors.append({"frameTemplate": frame_name, "message": str(exc)})

@@ -282,6 +282,32 @@ window.EditProImageRoomMap = {
       .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
       .join(" ");
   },
+
+  async loadRooms() {
+    const data = await EditProUtils.apiGet("/api/image-room-map/rooms");
+    return data.rooms || [];
+  },
+
+  async backfillFromFilenames() {
+    // Catalog is fetched server-side in page batches to avoid huge request bodies (413).
+    const data = await EditProUtils.apiPost("/api/image-room-map/backfill-filename", {});
+    if (data.mappings) {
+      this.mappings = data.mappings;
+      this.loaded = true;
+    } else {
+      await this.loadMappings();
+    }
+    return data;
+  },
+
+  async upsertRooms(items) {
+    const data = await EditProUtils.apiPost("/api/image-room-map/upsert", { items });
+    if (data.mappings) {
+      this.mappings = data.mappings;
+      this.loaded = true;
+    }
+    return data;
+  },
 };
 
 (function initImageRoomMapLoader() {

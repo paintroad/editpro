@@ -63,6 +63,18 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 10.5V19a1 1 0 001 1h6v-6.5H3zm8 0V20h6a1 1 0 001-1v-8.5h-7zm8-1.5V19a1 1 0 01-1 1h-2V9H19a1 1 0 011 1v1z"/><path stroke-linecap="round" stroke-linejoin="round" d="M3 9.5L12 4l9 5.5"/></svg>
             <span class="rail-module-label">Image Room Map</span>
           </button>
+          <button type="button" class="rail-module" data-module="labels" title="Custom Labels" aria-label="Custom Labels">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"/></svg>
+            <span class="rail-module-label">Custom Labels</span>
+          </button>
+          <button type="button" class="rail-module" data-module="artists" title="Artists" aria-label="Artists">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+            <span class="rail-module-label">Artists</span>
+          </button>
+          <button type="button" class="rail-module" data-module="sale" title="Sale" aria-label="Sale">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"/><path stroke-linecap="round" d="M9.5 14.5l5-5"/></svg>
+            <span class="rail-module-label">Sale</span>
+          </button>
         </nav>
         <button type="button" id="sidebarThemeToggle" class="rail-module rail-theme" aria-label="Switch to dark mode" title="Dark mode">
           <span class="rail-theme-icon" aria-hidden="true"></span>
@@ -472,6 +484,10 @@
                 <span>Shopify live</span>
               </label>
               <label class="marketplace-source-option">
+                <input type="radio" name="marketplaceSource" value="collections" />
+                <span>Collections</span>
+              </label>
+              <label class="marketplace-source-option">
                 <input type="radio" name="marketplaceSource" value="catalog" />
                 <span>Catalog Builder</span>
               </label>
@@ -487,6 +503,62 @@
                 <option value="drafts">Drafts only</option>
               </select>
             </label>
+            <div id="marketplaceCollectionsWrap" class="marketplace-collections-wrap" hidden>
+              <div class="marketplace-collections-toolbar">
+                <label class="field marketplace-collections-dropdown-field">
+                  <span>Select collections</span>
+                  <div id="marketplaceCollectionsDropdown" class="ms-dropdown marketplace-collections-dropdown"></div>
+                </label>
+                <span id="marketplaceCollectionsSelectedBadge" class="badge">0 selected</span>
+              </div>
+              <p id="marketplaceCollectionsEmpty" class="meta marketplace-collections-empty" hidden>
+                No collections found on the connected Shopify store.
+              </p>
+            </div>
+          </section>
+
+          <section
+            id="marketplaceGoogleSection"
+            class="card marketplace-card marketplace-google-section"
+            hidden
+          >
+            <div class="marketplace-card-header">
+              <div>
+                <h2>Google Shopping</h2>
+                <p class="meta">
+                  Export selected collection products as a Google Merchant Center CSV (one row per
+                  variant). No sample template required.
+                </p>
+              </div>
+              <span class="badge">CSV</span>
+            </div>
+            <div class="marketplace-card-actions">
+              <button
+                type="button"
+                id="marketplaceGoogleInspectBtn"
+                class="btn btn-secondary btn-sm"
+                disabled
+              >
+                Preview columns
+              </button>
+              <button
+                type="button"
+                id="marketplaceGoogleExportBtn"
+                class="btn btn-primary btn-sm"
+                disabled
+              >
+                Export
+              </button>
+              <a
+                id="marketplaceGoogleDownloadLink"
+                class="btn btn-secondary btn-sm square-download-link marketplace-download-link disabled"
+                href="#"
+                hidden
+              >
+                Download
+              </a>
+            </div>
+            <p id="marketplaceGoogleStatus" class="meta marketplace-card-status"></p>
           </section>
 
           <div id="marketplaceCards" class="marketplace-cards"></div>
@@ -547,6 +619,236 @@
           </section>
         </div>
 
+        <div id="module-labels" class="module-panel labels-module" hidden>
+          <div class="labels-action-bar">
+            <div class="labels-action-left">
+              <div class="labels-action-title-row">
+                <span class="labels-module-title">Custom Labels</span>
+                <span id="labelsProductCountBadge" class="badge">0 products</span>
+              </div>
+              <p id="labelsStatusMeta" class="meta labels-status-meta">Load live Shopify products to view Google Shopping labels.</p>
+            </div>
+            <div class="labels-action-right">
+              <button type="button" id="labelsRefreshBtn" class="btn btn-primary btn-sm">Refresh from Shopify</button>
+            </div>
+          </div>
+
+          <div id="labelsMessage" class="message seo-toast hidden" role="alert"></div>
+
+          <section class="card labels-bulk-card">
+            <h2>Bulk edit</h2>
+            <div class="labels-bulk-selection">
+              <div class="labels-bulk-selection-left">
+                <label class="labels-check">
+                  <input type="checkbox" id="labelsIncludeVariants" />
+                  <span>Include variants</span>
+                </label>
+                <label class="labels-check" id="labelsSelectAllVariantsWrap" hidden>
+                  <input type="checkbox" id="labelsSelectAllVariants" />
+                  <span>Select all variants</span>
+                </label>
+              </div>
+              <p id="labelsSelectionMeta" class="meta">0 products selected</p>
+            </div>
+            <div class="labels-bulk-apply">
+              <fieldset class="labels-scope-fieldset">
+                <legend class="sr-only">Edit scope</legend>
+                <label class="labels-check">
+                  <input type="radio" name="labelsScope" value="product" checked />
+                  <span>Product labels</span>
+                </label>
+                <label class="labels-check">
+                  <input type="radio" name="labelsScope" value="variant" />
+                  <span>Variant labels</span>
+                </label>
+              </fieldset>
+              <label class="field labels-bulk-field">
+                <span>Label</span>
+                <select id="labelsBulkKey">
+                  <option value="custom_label_0">custom_label_0</option>
+                  <option value="custom_label_1">custom_label_1</option>
+                  <option value="custom_label_2">custom_label_2</option>
+                  <option value="custom_label_3">custom_label_3</option>
+                  <option value="custom_label_4">custom_label_4</option>
+                </select>
+              </label>
+              <label class="field labels-bulk-field labels-bulk-value">
+                <span>Value</span>
+                <input type="text" id="labelsBulkValue" placeholder="e.g. trendy" />
+              </label>
+              <div class="labels-bulk-actions">
+                <button type="button" id="labelsBulkApplyBtn" class="btn btn-primary btn-sm" disabled>Apply to selected</button>
+                <button type="button" id="labelsBulkClearBtn" class="btn btn-secondary btn-sm" disabled>Clear on selected</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="card labels-list-card">
+            <div class="labels-filter-bar">
+              <div class="labels-filter-controls">
+                <input type="search" id="labelsSearch" class="labels-filter-search" placeholder="Search title or handle…" />
+                <select id="labelsCollectionFilter" class="labels-filter-select" title="Filter by collection">
+                  <option value="">All collections</option>
+                </select>
+                <select id="labelsFilter" class="labels-filter-select">
+                  <option value="all">All products</option>
+                  <option value="has-label">Has any label</option>
+                  <option value="empty">No labels</option>
+                </select>
+              </div>
+              <div class="labels-filter-actions">
+                <div id="labelsPagination" class="catalog-pagination" hidden>
+                  <button type="button" id="labelsPrevBtn" class="catalog-page-btn">Prev</button>
+                  <span id="labelsPageInfo" class="catalog-page-info"></span>
+                  <button type="button" id="labelsNextBtn" class="catalog-page-btn">Next</button>
+                </div>
+              </div>
+            </div>
+            <p id="labelsEmpty" class="catalog-empty" hidden></p>
+            <div id="labelsTableWrap" class="table-wrap labels-table-wrap">
+              <table class="labels-table">
+                <thead>
+                  <tr>
+                    <th class="labels-col-check">
+                      <input type="checkbox" id="labelsSelectVisible" aria-label="Select all visible products" title="Select all visible" />
+                    </th>
+                    <th class="labels-col-expand" aria-label="Expand"></th>
+                    <th class="labels-col-title">Product / variant</th>
+                    <th class="labels-col-sku">SKU / price</th>
+                    <th class="labels-col-input">Label 0</th>
+                    <th class="labels-col-input">Label 1</th>
+                    <th class="labels-col-input">Label 2</th>
+                    <th class="labels-col-input">Label 3</th>
+                    <th class="labels-col-input">Label 4</th>
+                    <th class="labels-col-save"></th>
+                  </tr>
+                </thead>
+                <tbody id="labelsTableBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <div id="module-artists" class="module-panel artists-module" hidden>
+          <div class="artists-action-bar">
+            <div class="artists-action-left">
+              <span class="artists-module-title">Artists</span>
+              <span id="artistsCountBadge" class="badge">0 artists</span>
+              <p id="artistsStatusMeta" class="meta">Scan Famous Painters folders to load artists.</p>
+            </div>
+            <div class="artists-action-right">
+              <button type="button" id="artistsScanBtn" class="btn btn-secondary btn-sm">Scan folders</button>
+              <button type="button" id="artistsRefreshBtn" class="btn btn-secondary btn-sm">Refresh</button>
+            </div>
+          </div>
+
+          <div id="artistsMessage" class="message seo-toast hidden" role="alert"></div>
+
+          <section class="card artists-bulk-card">
+            <div class="artists-bulk-row">
+              <label class="artists-check">
+                <input type="checkbox" id="artistsSelectAll" />
+                <span>Select all</span>
+              </label>
+              <button type="button" id="artistsEnrichBtn" class="btn btn-primary btn-sm" disabled>Fetch from AI</button>
+              <button type="button" id="artistsShopifyBtn" class="btn btn-primary btn-sm" disabled>Add on Shopify</button>
+              <button type="button" id="artistsLinkBtn" class="btn btn-secondary btn-sm" disabled>Link products</button>
+              <p id="artistsSelectionMeta" class="meta">0 selected</p>
+            </div>
+          </section>
+
+          <section class="card artists-list-card">
+            <p id="artistsEmpty" class="catalog-empty" hidden></p>
+            <div class="table-wrap artists-table-wrap table-wrap-full">
+              <table class="artists-table">
+                <thead>
+                  <tr>
+                    <th class="artists-col-check"></th>
+                    <th class="artists-col-thumb">Image</th>
+                    <th>Artist</th>
+                    <th>Nationality</th>
+                    <th>Products</th>
+                    <th>Enrich</th>
+                    <th>Shopify</th>
+                    <th>Bio</th>
+                    <th>Wikipedia</th>
+                  </tr>
+                </thead>
+                <tbody id="artistsTableBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <div id="module-sale" class="module-panel sale-module" hidden>
+          <div class="sale-action-bar">
+            <div class="sale-action-left">
+              <span class="sale-module-title">Sale</span>
+              <span id="saleCountBadge" class="badge">0 on sale</span>
+              <p id="saleStatusMeta" class="meta">Click Refresh to pick up to 50 XL Canvas Black/White variants.</p>
+            </div>
+            <div class="sale-action-right">
+              <div class="sale-discount-meter" title="Discount range applied randomly per product">
+                <label class="sale-discount-field">
+                  <span>Min %</span>
+                  <input type="number" id="saleDiscountMin" min="1" max="90" step="1" value="5" />
+                </label>
+                <div class="sale-discount-slider-wrap">
+                  <input type="range" id="saleDiscountMinRange" min="1" max="90" step="1" value="5" aria-label="Minimum discount percent" />
+                  <input type="range" id="saleDiscountMaxRange" min="1" max="90" step="1" value="15" aria-label="Maximum discount percent" />
+                </div>
+                <label class="sale-discount-field">
+                  <span>Max %</span>
+                  <input type="number" id="saleDiscountMax" min="1" max="90" step="1" value="15" />
+                </label>
+                <span id="saleDiscountLabel" class="sale-discount-label">5–15%</span>
+              </div>
+              <button type="button" id="saleRevertBtn" class="btn btn-secondary btn-sm" disabled>Back to original</button>
+              <button type="button" id="saleRefreshBtn" class="btn btn-primary btn-sm">Refresh</button>
+            </div>
+          </div>
+
+          <div id="saleMessage" class="message seo-toast hidden" role="alert"></div>
+
+          <section class="card sale-bulk-card">
+            <div class="sale-bulk-row">
+              <label class="sale-check">
+                <input type="checkbox" id="saleSelectAll" />
+                <span>Select all</span>
+              </label>
+              <p id="saleSelectionMeta" class="meta">0 selected</p>
+            </div>
+          </section>
+
+          <section class="card sale-list-card">
+            <p id="saleEmpty" class="catalog-empty">No products on sale yet. Adjust the discount range and click Refresh.</p>
+            <div class="table-wrap sale-table-wrap table-wrap-full" id="saleTableWrap" hidden>
+              <table class="sale-table">
+                <thead>
+                  <tr>
+                    <th class="sale-col-check"></th>
+                    <th class="sale-col-thumb">Image</th>
+                    <th>Product</th>
+                    <th>Collection</th>
+                    <th>Variant</th>
+                    <th>List price</th>
+                    <th>Sale price</th>
+                    <th>Discount</th>
+                  </tr>
+                </thead>
+                <tbody id="saleTableBody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <div id="saleOverlay" class="fetch-overlay" hidden aria-live="polite">
+            <div class="fetch-overlay-panel">
+              <p class="fetch-overlay-title" id="saleOverlayTitle">Updating sale prices…</p>
+              <p class="fetch-overlay-stats" id="saleOverlayStatus">Please wait…</p>
+            </div>
+          </div>
+        </div>
+
         <div id="module-roommap" class="module-panel roommap-module" hidden>
           <div class="room-map-action-bar">
             <div class="room-map-action-left">
@@ -556,6 +858,7 @@
             </div>
             <div class="room-map-action-right">
               <span id="roomMapCoverage" class="room-map-coverage-stat">0 / 0 mapped</span>
+              <button type="button" id="roomMapBackfillBtn" class="btn btn-secondary btn-sm" disabled>Backfill from filenames</button>
               <button type="button" id="roomMapScanBtn" class="btn btn-primary btn-sm" disabled>Map unmapped images</button>
             </div>
           </div>
@@ -587,6 +890,23 @@
             </div>
           </section>
 
+          <section class="card room-map-assign-card">
+            <div class="room-map-assign-row">
+              <label class="room-map-check">
+                <input type="checkbox" id="roomMapSelectAll" />
+                <span>Select all visible</span>
+              </label>
+              <label class="field room-map-assign-room-field">
+                <span>Room</span>
+                <select id="roomMapAssignRoom">
+                  <option value="">Choose room…</option>
+                </select>
+              </label>
+              <button type="button" id="roomMapAssignBtn" class="btn btn-primary btn-sm" disabled>Assign room</button>
+              <p id="roomMapSelectionMeta" class="meta">0 selected</p>
+            </div>
+          </section>
+
           <section class="card room-map-list-card">
             <div class="room-map-filter-bar seo-filter-bar">
               <div class="filter-scroll-bar room-map-filter-scroll">
@@ -613,6 +933,7 @@
               <table class="room-map-table">
                 <thead>
                   <tr>
+                    <th class="room-map-col-check"></th>
                     <th>Image</th>
                     <th>Product / resource</th>
                     <th>#</th>
@@ -622,7 +943,7 @@
                 </thead>
                 <tbody id="roomMapTableBody">
                   <tr class="empty-row">
-                    <td colspan="5">Fetch catalog data to list images.</td>
+                    <td colspan="6">Fetch catalog data to list images.</td>
                   </tr>
                 </tbody>
               </table>
@@ -630,6 +951,32 @@
           </section>
         </div>
       </main>
+    </div>
+
+    <div id="artistBioModal" class="modal" hidden>
+      <div class="modal-backdrop"></div>
+      <div class="modal-panel modal-panel-wide" role="dialog" aria-labelledby="artistBioModalTitle">
+        <div class="modal-header">
+          <h2 id="artistBioModalTitle">Edit biography</h2>
+          <button type="button" id="artistBioModalClose" class="modal-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p id="artistBioModalHint" class="meta">History and body of work only — no images.</p>
+          <div class="artist-bio-toolbar" role="toolbar" aria-label="Formatting">
+            <button type="button" class="btn btn-secondary btn-sm" data-bio-cmd="bold" title="Bold"><strong>B</strong></button>
+            <button type="button" class="btn btn-secondary btn-sm" data-bio-cmd="italic" title="Italic"><em>I</em></button>
+            <button type="button" class="btn btn-secondary btn-sm" data-bio-cmd="insertUnorderedList" title="Bulleted list">• List</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-bio-cmd="insertOrderedList" title="Numbered list">1. List</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-bio-cmd="formatBlock" data-bio-value="p" title="Paragraph">¶</button>
+          </div>
+          <div id="artistBioEditor" class="artist-bio-editor" contenteditable="true" role="textbox" aria-multiline="true"></div>
+          <div id="artistBioModalMessage" class="message hidden" role="alert"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="artistBioCancelBtn" class="btn btn-secondary">Cancel</button>
+          <button type="button" id="artistBioSaveBtn" class="btn btn-primary">Save biography</button>
+        </div>
+      </div>
     </div>
 
     <div id="descriptionPhrasesModal" class="modal" hidden>
@@ -1051,5 +1398,8 @@
     <script src="js/catalog-shopify-push.js"></script>
     <script src="js/room-map.js"></script>
     <script src="js/marketplace.js"></script>
+    <script src="js/custom-labels.js"></script>
+    <script src="js/artists.js"></script>
+    <script src="js/sale.js"></script>
   </body>
 </html>

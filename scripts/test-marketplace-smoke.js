@@ -81,10 +81,12 @@ function amazonRowValue(row, fieldRow, key) {
   return row[columnMap[key]];
 }
 
-for (const id of ["pinterest", "flipkart", "amazon"]) {
+for (const id of ["pinterest", "flipkart", "amazon", "google"]) {
   const adapter = getMarketplace(id);
   let sampleRows;
-  if (id === "pinterest") {
+  if (id === "google") {
+    sampleRows = [adapter.defaultHeaders];
+  } else if (id === "pinterest") {
     sampleRows = readCsvRows(paths[id]);
   } else {
     const workbook = readWorkbook(paths[id]);
@@ -95,6 +97,20 @@ for (const id of ["pinterest", "flipkart", "amazon"]) {
   const dataRow = built[meta.dataStartRow - 1];
   const nonEmpty = dataRow.filter((value) => value !== "" && value != null).length;
   console.log(`${id}: ${nonEmpty} populated cells in first data row`);
+
+  if (id === "google") {
+    const mapped = adapter.mapRow(variantRows[0], {
+      ...ctx,
+      primaryDomainHost: "paintroad.com",
+    });
+    assert(mapped.brand === BRAND, `Google brand is ${BRAND}`);
+    assert(mapped.availability === "in_stock", "Google availability is in_stock");
+    assert(mapped.identifier_exists === "no", "Google identifier_exists is no");
+    assert(mapped.mpn === sampleProduct.variants[0].sku, "Google mpn is SKU");
+    assert(mapped.item_group_id === sampleProduct.handle, "Google item_group_id is handle");
+    assert(String(mapped.price).endsWith(" INR"), "Google price includes INR");
+    assert(built[0].includes("id") && built[0].includes("gtin"), "Google CSV has required headers");
+  }
 
   if (id === "amazon") {
     const fieldRow = sampleRows[4] || [];

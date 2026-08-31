@@ -13,6 +13,9 @@
   const moduleMarketplace = document.getElementById("module-marketplace");
   const moduleCollections = document.getElementById("module-collections");
   const moduleRoommap = document.getElementById("module-roommap");
+  const moduleLabels = document.getElementById("module-labels");
+  const moduleArtists = document.getElementById("module-artists");
+  const moduleSale = document.getElementById("module-sale");
   const connectionModal = document.getElementById("connectionModal");
   const settingsModal = document.getElementById("settingsModal");
 
@@ -43,6 +46,15 @@
     }
     if (moduleRoommap) {
       moduleRoommap.hidden = moduleId !== "roommap";
+    }
+    if (moduleLabels) {
+      moduleLabels.hidden = moduleId !== "labels";
+    }
+    if (moduleArtists) {
+      moduleArtists.hidden = moduleId !== "artists";
+    }
+    if (moduleSale) {
+      moduleSale.hidden = moduleId !== "sale";
     }
     const isSeoModule = moduleId === "audit" || moduleId === "live";
     if (seoSharedChrome) {
