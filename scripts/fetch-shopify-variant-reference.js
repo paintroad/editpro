@@ -45,11 +45,20 @@ function parseSizeCode(sizeLabel) {
 }
 
 function normalizeFrame(frame) {
-  const f = String(frame || "").trim().toLowerCase();
+  const f = String(frame || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-");
   if (f === "black-frame") {
     return "black";
   }
-  if (f === "stretched canvas" || f === "stretched-canvas") {
+  if (f === "wooden-finish") {
+    return "wooden";
+  }
+  if (f === "dark-wood-finish" || f === "dark-wood") {
+    return "dark-wood";
+  }
+  if (f === "stretched-canvas" || f === "stretchedcanvas") {
     return "stretched-canvas";
   }
   return f;
