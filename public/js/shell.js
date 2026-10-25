@@ -16,6 +16,7 @@
   const moduleLabels = document.getElementById("module-labels");
   const moduleArtists = document.getElementById("module-artists");
   const moduleSale = document.getElementById("module-sale");
+  const moduleArtwork = document.getElementById("module-artwork");
   const connectionModal = document.getElementById("connectionModal");
   const settingsModal = document.getElementById("settingsModal");
 
@@ -37,6 +38,9 @@
     }
     if (moduleCatalog) {
       moduleCatalog.hidden = moduleId !== "catalog";
+    }
+    if (moduleArtwork) {
+      moduleArtwork.hidden = moduleId !== "artwork";
     }
     if (moduleMarketplace) {
       moduleMarketplace.hidden = moduleId !== "marketplace";

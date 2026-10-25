@@ -117,6 +117,7 @@ const {
   listMarketplaceCollections,
   DEFAULT_TEMPLATE_DIR,
 } = require("./lib/marketplace/export-service");
+const artworkExtract = require("./lib/artwork-extract");
 
 const app = express();
 const PORT = process.env.PORT || 3847;
@@ -1397,6 +1398,43 @@ router.post("/api/sale/revert", async (req, res) => {
 router.use(express.static(PUBLIC_DIR));
 router.get("/", (_req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, "index.html"));
+});
+
+router.get("/api/artwork-extract", (_req, res) => {
+  res.json(artworkExtract.getStatus());
+});
+
+router.get("/api/artwork-extract/list", async (req, res) => {
+  try {
+    res.json(await artworkExtract.list({ input: String(req.query.input || "").trim() }));
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to list images." });
+  }
+});
+
+router.get("/api/artwork-extract/thumb", async (req, res) => {
+  try {
+    const thumbPath = await artworkExtract.thumbnail({
+      key: String(req.query.key || ""),
+      width: parseThumbWidth(req.query.w),
+    });
+    res.setHeader("Cache-Control", "private, max-age=300");
+    res.sendFile(thumbPath);
+  } catch (error) {
+    res.status(404).json({ error: error.message || "Image not found." });
+  }
+});
+
+router.post("/api/artwork-extract/start", (req, res) => {
+  try {
+    res.json(artworkExtract.start(req.body || {}));
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to start the extraction." });
+  }
+});
+
+router.post("/api/artwork-extract/stop", (_req, res) => {
+  res.json(artworkExtract.stop());
 });
 
 app.use(BASE_PATH, router);
