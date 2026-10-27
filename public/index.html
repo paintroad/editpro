@@ -491,6 +491,10 @@
                 <input type="text" id="pipelineInputPath" placeholder="Folder of new paintings" />
               </label>
               <label class="catalog-path-field">
+                <span class="catalog-path-field-label">Printable</span>
+                <input type="text" id="pipelinePrintablePath" placeholder="Print-ready files, same names" />
+              </label>
+              <label class="catalog-path-field">
                 <span class="catalog-path-field-label">Frames</span>
                 <input type="text" id="pipelineFramePath" placeholder="Frame templates" />
               </label>
@@ -532,6 +536,7 @@
                     </th>
                     <th>Image</th>
                     <th>File</th>
+                    <th>Printable</th>
                     <th>ID</th>
                     <th>Title</th>
                     <th>Orientation</th>
@@ -544,7 +549,7 @@
                 </thead>
                 <tbody id="pipelineTableBody">
                   <tr class="empty-row">
-                    <td colspan="11">Detect scans the paintings folder.</td>
+                    <td colspan="12">Detect scans the paintings folder.</td>
                   </tr>
                 </tbody>
               </table>

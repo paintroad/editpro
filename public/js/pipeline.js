@@ -14,6 +14,7 @@
   const detectBtn = document.getElementById("pipelineDetectBtn");
   const processBtn = document.getElementById("pipelineProcessBtn");
   const inputPathEl = document.getElementById("pipelineInputPath");
+  const printablePathEl = document.getElementById("pipelinePrintablePath");
   const framePathEl = document.getElementById("pipelineFramePath");
   const outputPathEl = document.getElementById("pipelineOutputPath");
   const countBadge = document.getElementById("pipelineCountBadge");
@@ -62,6 +63,7 @@
   function paths() {
     return {
       inputPath: inputPathEl.value.trim(),
+      printablePath: printablePathEl.value.trim(),
       frameTemplatesPath: framePathEl.value.trim(),
       outputPath: outputPathEl.value.trim(),
     };
@@ -70,12 +72,13 @@
   function applySettings(settings) {
     if (!settings) return;
     inputPathEl.value = settings.inputPath || "";
+    printablePathEl.value = settings.printablePath || "";
     framePathEl.value = settings.frameTemplatesPath || "";
     outputPathEl.value = settings.outputPath || "";
   }
 
   function canProcess(row) {
-    return row.stage !== "live";
+    return row.stage !== "live" && Boolean(row.printable);
   }
 
   function filteredItems() {
@@ -101,7 +104,7 @@
   }
 
   function detectedItems() {
-    return items.filter((row) => row.stage === "detected");
+    return items.filter((row) => row.stage === "detected" && canProcess(row));
   }
 
   function updateProcessButton() {
@@ -176,7 +179,7 @@
 
     if (!items.length) {
       tableBody.innerHTML =
-        '<tr class="empty-row"><td colspan="11">No paintings in this folder. Add files, then Detect.</td></tr>';
+        '<tr class="empty-row"><td colspan="12">No paintings in this folder. Add files, then Detect.</td></tr>';
       renderSelectAllBar();
       updateHeaderCheckbox();
       updateProcessButton();
@@ -184,7 +187,7 @@
     }
     if (!visible.length) {
       tableBody.innerHTML =
-        '<tr class="empty-row"><td colspan="11">No paintings match this filter.</td></tr>';
+        '<tr class="empty-row"><td colspan="12">No paintings match this filter.</td></tr>';
       renderSelectAllBar();
       updateHeaderCheckbox();
       updateProcessButton();
@@ -207,6 +210,7 @@
           </td>
           <td class="catalog-col-thumb"><img class="room-map-thumb" src="${EditProUtils.escapeHtml(thumbUrl(row))}" alt="" loading="lazy" /></td>
           <td>${EditProUtils.escapeHtml(row.fileName)}</td>
+          <td>${row.printable ? EditProUtils.escapeHtml(row.printable) : '<span class="room-map-status room-map-status--error">Missing</span>'}</td>
           <td>${EditProUtils.escapeHtml(row.productId || "—")}</td>
           <td>${EditProUtils.escapeHtml(title)}</td>
           <td>${EditProUtils.escapeHtml(row.orientation || "—")}</td>
@@ -242,7 +246,8 @@
     if (countBadge) countBadge.textContent = `${counts.total || 0} ${noun}`;
     if (statsMeta) {
       const next = data.nextProductId ? `Next number ${data.nextProductId}.` : "";
-      statsMeta.textContent = `${counts.detected || 0} detected, ${counts.live || 0} live. ${next}`.trim();
+      const missing = counts.noPrintable ? ` ${counts.noPrintable} missing a printable file.` : "";
+      statsMeta.textContent = `${counts.detected || 0} detected, ${counts.live || 0} live.${missing} ${next}`.trim();
     }
     renderTable();
     if (data.job) applyJob(data.job);
