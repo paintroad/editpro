@@ -1,6 +1,6 @@
 """AI artwork pipeline helper: Raw -> AI (+ AI Compare) -> Oriented -> Upscaled.
 
-  register --root R             name new Raw images (<brand>_<n>) and record them in catalog.db
+  register --root R             name new Raw images (<brand>_<n>) and record them in ~/.editpro/pipeline-prep/catalog.db
   compare  --root R [--label L] [--before original|oriented] NAME...
                                 build AI Compare/<name>.jpg (original or current final | AI) and mark it for review
   feedback --root R             list images with review feedback, as JSON
@@ -18,6 +18,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 Image.MAX_IMAGE_PIXELS = None
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"}
 RAW, AI, COMPARE, ORIENTED = "Raw", "AI", "AI Compare", "Oriented"
+DB_PATH = os.path.join(os.path.expanduser("~"), ".editpro", "pipeline-prep", "catalog.db")
 ORIGINALS = os.path.join("_ai_work", "originals")
 COLUMNS = {
     "review_status": "TEXT", "review_note": "TEXT", "last_feedback": "TEXT",
@@ -35,7 +36,8 @@ def emit(**row):
 
 
 def open_db(root):
-    db = sqlite3.connect(os.path.join(root, "catalog.db"), timeout=10)
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    db = sqlite3.connect(DB_PATH, timeout=10)
     db.row_factory = sqlite3.Row
     have = {r[1] for r in db.execute("PRAGMA table_info(images)")}
     for name, kind in COLUMNS.items():
