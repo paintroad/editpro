@@ -10,12 +10,14 @@
   const moduleLive = document.getElementById("module-live");
   const moduleSquare = document.getElementById("module-square");
   const moduleCatalog = document.getElementById("module-catalog");
+  const modulePipeline = document.getElementById("module-pipeline");
   const moduleMarketplace = document.getElementById("module-marketplace");
   const moduleCollections = document.getElementById("module-collections");
   const moduleRoommap = document.getElementById("module-roommap");
   const moduleLabels = document.getElementById("module-labels");
   const moduleArtists = document.getElementById("module-artists");
   const moduleSale = document.getElementById("module-sale");
+  const moduleCutout = document.getElementById("module-cutout");
   const moduleArtwork = document.getElementById("module-artwork");
   const connectionModal = document.getElementById("connectionModal");
   const settingsModal = document.getElementById("settingsModal");
@@ -39,8 +41,8 @@
     if (moduleCatalog) {
       moduleCatalog.hidden = moduleId !== "catalog";
     }
-    if (moduleArtwork) {
-      moduleArtwork.hidden = moduleId !== "artwork";
+    if (modulePipeline) {
+      modulePipeline.hidden = moduleId !== "pipeline";
     }
     if (moduleMarketplace) {
       moduleMarketplace.hidden = moduleId !== "marketplace";
@@ -59,6 +61,12 @@
     }
     if (moduleSale) {
       moduleSale.hidden = moduleId !== "sale";
+    }
+    if (moduleCutout) {
+      moduleCutout.hidden = moduleId !== "cutout";
+    }
+    if (moduleArtwork) {
+      moduleArtwork.hidden = moduleId !== "artwork";
     }
     const isSeoModule = moduleId === "audit" || moduleId === "live";
     if (seoSharedChrome) {

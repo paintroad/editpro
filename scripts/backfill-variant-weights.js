@@ -83,7 +83,13 @@ function normalizeFrame(frame) {
     .replace(/\s+/g, "-");
   if (f === "black-frame") return "black";
   if (f === "wooden-finish") return "wooden";
-  if (f === "dark-wood-finish" || f === "dark-wood") return "dark-wood";
+  if (
+    f === "dark-wood-finish" ||
+    f === "dark-wood" ||
+    f === "dark-brown"
+  ) {
+    return "dark-wood";
+  }
   if (f === "stretched-canvas" || f === "stretchedcanvas") {
     return "stretched-canvas";
   }

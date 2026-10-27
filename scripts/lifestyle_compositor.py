@@ -918,6 +918,69 @@ def multiply_blend(
     return np.clip(result, 0, 255).astype(np.uint8)
 
 
+def _read_frame_with_alpha(frame_path: str):
+    raw = cv2.imread(frame_path, cv2.IMREAD_UNCHANGED)
+    if raw is None:
+        return None, None
+    if raw.ndim == 2:
+        return cv2.cvtColor(raw, cv2.COLOR_GRAY2BGR), None
+    if raw.shape[2] == 4:
+        return raw[:, :, :3], raw[:, :, 3]
+    return raw[:, :, :3], None
+
+
+def _resize_alpha(alpha: Optional[np.ndarray], canvas_size: int) -> Optional[np.ndarray]:
+    if alpha is None:
+        return None
+    if alpha.shape[0] == canvas_size and alpha.shape[1] == canvas_size:
+        return alpha
+    return cv2.resize(alpha, (canvas_size, canvas_size), interpolation=cv2.INTER_AREA)
+
+
+def _quad_from_alpha(alpha: np.ndarray, canvas_size: int) -> Optional[np.ndarray]:
+    hole = (alpha < 16).astype(np.uint8) * 255
+    if cv2.countNonZero(hole) < canvas_size * canvas_size * 0.02:
+        return None
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    hole = cv2.morphologyEx(hole, cv2.MORPH_CLOSE, kernel, iterations=1)
+    contours, _ = cv2.findContours(hole, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+    contour = max(contours, key=cv2.contourArea)
+    rect = cv2.minAreaRect(contour)
+    quad = order_points(cv2.boxPoints(rect).astype(np.float32))
+    if not _is_valid_quad(quad, canvas_size):
+        return None
+    return quad
+
+
+def _save_composite(result_bgr, output_path: str, jpeg_quality: int, alpha=None, region_mask=None) -> None:
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    write_png = output_path.lower().endswith(".png")
+    suffix = ".png" if write_png else ".jpg"
+    fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+    os.close(fd)
+    try:
+        if write_png:
+            rgb = cv2.cvtColor(result_bgr, cv2.COLOR_BGR2RGB)
+            if alpha is None:
+                out_alpha = np.full(rgb.shape[:2], 255, np.uint8)
+            else:
+                out_alpha = alpha.copy()
+                if region_mask is not None:
+                    out_alpha[region_mask > 0] = 255
+            rgba = np.dstack([rgb, out_alpha])
+            Image.fromarray(rgba, mode="RGBA").save(tmp_path, format="PNG")
+        else:
+            rgb = cv2.cvtColor(result_bgr, cv2.COLOR_BGR2RGB)
+            Image.fromarray(rgb).save(tmp_path, format="JPEG", quality=jpeg_quality, optimize=True)
+        os.replace(tmp_path, output_path)
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+
 def composite_painting_into_frame(
     painting_path: str,
     frame_path: str,
@@ -939,13 +1002,19 @@ def composite_painting_into_frame(
             raise ValueError(f"Could not read painting: {painting_path}")
         painting_crop = detect_painting_content(painting_bgr)
 
-    frame_bgr = cv2.imread(frame_path, cv2.IMREAD_COLOR)
+    frame_bgr, frame_alpha = _read_frame_with_alpha(frame_path)
     if frame_bgr is None:
         raise ValueError(f"Could not read frame: {frame_path}")
 
     frame_resized = _ensure_canvas(frame_bgr, canvas_size)
+    frame_alpha = _resize_alpha(frame_alpha, canvas_size)
+    alpha_quad = _quad_from_alpha(frame_alpha, canvas_size) if frame_alpha is not None else None
     stored_quad = stored_quad_for(orientation, frame_template, canvas_size, frame_set=frame_set)
-    if stored_quad is not None:
+    if alpha_quad is not None:
+        hole = (frame_alpha < 16).astype(np.uint8) * 255
+        warped, geom_mask = fit_painting_to_quad(painting_crop, alpha_quad)
+        region_mask = cv2.bitwise_and(hole, cv2.bitwise_and(geom_mask, _mask_from_quad(alpha_quad, canvas_size)))
+    elif stored_quad is not None:
         quad = stored_quad
         warped, geom_mask = fit_painting_to_quad(painting_crop, quad)
         region_mask = _mask_from_quad(quad, canvas_size)
@@ -985,20 +1054,16 @@ def composite_painting_into_frame(
     result = multiply_blend(frame_resized, warped, region_mask, mode=blend_mode, strength=blend_strength)
 
     if os.getenv("EDITPRO_COMPOSITOR_DEBUG") == "1":
-        _write_compositor_debug(frame_resized, quad, output_path, region_mask, canvas_size)
+        debug_quad = alpha_quad if alpha_quad is not None else (stored_quad if stored_quad is not None else quad)
+        _write_compositor_debug(frame_resized, debug_quad, output_path, region_mask, canvas_size)
 
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    rgb = cv2.cvtColor(result, cv2.COLOR_BGR2RGB)
-    img = Image.fromarray(rgb)
-    fd, tmp_path = tempfile.mkstemp(suffix=".jpg")
-    os.close(fd)
-    try:
-        img.save(tmp_path, format="JPEG", quality=jpeg_quality, optimize=True)
-        os.replace(tmp_path, output_path)
-    except Exception:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-        raise
+    _save_composite(
+        result,
+        output_path,
+        jpeg_quality,
+        alpha=frame_alpha if output_path.lower().endswith(".png") else None,
+        region_mask=region_mask if output_path.lower().endswith(".png") else None,
+    )
     file_size = os.path.getsize(output_path)
     return {"path": output_path, "bytes": file_size}
 
@@ -1057,10 +1122,12 @@ def generate_for_product(
         output_suffix = entry.get("outputSuffix") or entry.get("output_suffix")
         if not output_suffix and frame_colour:
             output_suffix = str(frame_colour).strip().lower()
+        is_base = bool(entry.get("isBase") or entry.get("is_base"))
+        ext = ".png" if is_base else ".jpg"
         if output_suffix:
-            filename = f"{output_base_name}_{output_index}_{output_suffix}.jpg"
+            filename = f"{output_base_name}_{output_index}_{output_suffix}{ext}"
         else:
-            filename = f"{output_base_name}_{output_index}.jpg"
+            filename = f"{output_base_name}_{output_index}{ext}"
         output_path = os.path.join(output_dir, filename)
         try:
             result = composite_painting_into_frame(

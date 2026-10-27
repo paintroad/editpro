@@ -13,6 +13,7 @@
  *   node scripts/set-variant-package-dimensions.js --product=soulful-serenity
  *   node scripts/set-variant-package-dimensions.js --product=soulful-serenity --apply
  *   node scripts/set-variant-package-dimensions.js --apply
+ *   node scripts/set-variant-package-dimensions.js --sizes=12x16,36x48 --apply
  *
  * Report: ~/.editpro/variant-package-dimensions-report.json
  */
@@ -24,11 +25,14 @@ const { getShopifyCredentials } = require("../lib/config-store");
 const { shopifyGraphql } = require("../lib/shopify-client");
 const {
   CONFIG_DIR,
+  FRAME_BOX_CM,
   loadShippingPackageMap,
   sizeKeyFromOptionValue,
   optionValue,
   packageGidForSizeKey,
 } = require("../lib/package-dimensions");
+
+const UNSTABLE_API = "unstable";
 
 const REPORT_PATH = path.join(
   CONFIG_DIR,
@@ -60,13 +64,23 @@ function sleep(ms) {
 function parseArgs(argv = process.argv.slice(2)) {
   let apply = false;
   let product = null;
+  /** Optional comma-separated size keys, e.g. 12x16,36x48 */
+  let sizes = null;
   for (const arg of argv) {
     if (arg === "--apply") apply = true;
     else if (arg.startsWith("--product=")) {
       product = arg.slice("--product=".length).replace(/^["']|["']$/g, "");
+    } else if (arg.startsWith("--sizes=")) {
+      sizes = new Set(
+        arg
+          .slice("--sizes=".length)
+          .split(",")
+          .map((s) => s.trim().toLowerCase())
+          .filter(Boolean)
+      );
     }
   }
-  return { apply, product };
+  return { apply, product, sizes };
 }
 
 function toProductGid(product) {
@@ -201,7 +215,7 @@ function currentWeight(variant) {
   };
 }
 
-function planVariantUpdates(product, packageMap) {
+function planVariantUpdates(product, packageMap, sizeFilter = null) {
   const planned = [];
   const skipped = [];
   for (const variant of product.variants?.nodes || []) {
@@ -227,6 +241,10 @@ function planVariantUpdates(product, packageMap) {
       skipped.push({ ...base, reason: "no_size_parse" });
       continue;
     }
+    if (sizeFilter && !sizeFilter.has(String(sizeKey).toLowerCase())) {
+      skipped.push({ ...base, reason: "size_filtered" });
+      continue;
+    }
     if (!packageGid) {
       skipped.push({ ...base, reason: "no_package_map" });
       continue;
@@ -240,44 +258,51 @@ function planVariantUpdates(product, packageMap) {
   return { planned, skipped };
 }
 
-async function applyUpdate(storeDomain, accessToken, inventoryItemId, packageGid, weight) {
+function measurementForRow(row) {
   const measurement = {
-    shippingPackageId: packageGid,
+    shippingPackageId: row.packageGid,
   };
-  // Defensive: re-send existing weight so measurement update cannot clear it.
-  if (weight && weight.value != null && !Number.isNaN(Number(weight.value))) {
-    measurement.weight = {
-      value: Number(weight.value),
-      unit: weight.unit || "GRAMS",
+  const box = FRAME_BOX_CM[row.sizeKey];
+  if (box) {
+    measurement.packedDimensions = {
+      length: box.length,
+      width: box.width,
+      height: box.height,
+      unit: "CENTIMETERS",
     };
   }
-  const data = await shopifyGraphql(
-    storeDomain,
-    accessToken,
-    INVENTORY_ITEM_UPDATE,
-    {
-      id: inventoryItemId,
-      input: { measurement },
-    }
-  );
-  const result = data.inventoryItemUpdate;
-  if (result?.userErrors?.length) {
-    throw new Error(result.userErrors.map((e) => e.message).join("; "));
-  }
-  return result?.inventoryItem?.id || inventoryItemId;
-}
-
-function buildBulkVariantInput(row) {
-  const measurement = { shippingPackageId: row.packageGid };
+  // Defensive: re-send existing weight so measurement update cannot clear it.
   if (row.weight && row.weight.value != null && !Number.isNaN(Number(row.weight.value))) {
     measurement.weight = {
       value: Number(row.weight.value),
       unit: row.weight.unit || "GRAMS",
     };
   }
+  return measurement;
+}
+
+async function applyUpdate(storeDomain, accessToken, row) {
+  const data = await shopifyGraphql(
+    storeDomain,
+    accessToken,
+    INVENTORY_ITEM_UPDATE,
+    {
+      id: row.inventoryItemId,
+      input: { measurement: measurementForRow(row) },
+    },
+    UNSTABLE_API
+  );
+  const result = data.inventoryItemUpdate;
+  if (result?.userErrors?.length) {
+    throw new Error(result.userErrors.map((e) => e.message).join("; "));
+  }
+  return result?.inventoryItem?.id || row.inventoryItemId;
+}
+
+function buildBulkVariantInput(row) {
   return {
     id: row.variantId,
-    inventoryItem: { measurement },
+    inventoryItem: { measurement: measurementForRow(row) },
   };
 }
 
@@ -292,7 +317,8 @@ async function applyProductBulk(storeDomain, accessToken, productId, rows) {
       {
         productId,
         variants: chunk.map(buildBulkVariantInput),
-      }
+      },
+      UNSTABLE_API
     );
     const result = data.productVariantsBulkUpdate;
     if (result?.userErrors?.length) {
@@ -302,7 +328,7 @@ async function applyProductBulk(storeDomain, accessToken, productId, rows) {
 }
 
 async function main() {
-  const { apply, product: productArg } = parseArgs();
+  const { apply, product: productArg, sizes: sizeFilter } = parseArgs();
   ensureConfigDir();
 
   // Clear park marker when running store-wide apply
@@ -358,9 +384,13 @@ async function main() {
     process.stdout.write(`\rProducts loaded: ${products.length}   \n`);
   }
 
+  if (sizeFilter) {
+    console.log(`Size filter: ${[...sizeFilter].join(", ")}`);
+  }
+
   const plannedByProduct = new Map();
   for (const product of products) {
-    const { planned, skipped } = planVariantUpdates(product, packageMap);
+    const { planned, skipped } = planVariantUpdates(product, packageMap, sizeFilter);
     allPlanned.push(...planned);
     allSkipped.push(...skipped);
     if (planned.length) {
@@ -397,13 +427,7 @@ async function main() {
         );
         for (const row of rows) {
           try {
-            await applyUpdate(
-              storeDomain,
-              accessToken,
-              row.inventoryItemId,
-              row.packageGid,
-              row.weight
-            );
+            await applyUpdate(storeDomain, accessToken, row);
             updated.push({ ...row, ok: true, fallback: true });
           } catch (err2) {
             errors.push({ ...row, error: err2?.message || String(err2) });

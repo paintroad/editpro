@@ -37,6 +37,7 @@ const {
   getSaleSession,
   updateSaleSettings,
   refreshSale,
+  reapplySaleDiscounts,
   revertSelected,
 } = require("./lib/sale-manager");
 const { fetchCatalog, fetchCatalogCounts } = require("./lib/catalog-fetcher");
@@ -101,6 +102,7 @@ const {
 } = require("./lib/collections-shopify-create");
 const roomScanRunner = require("./lib/room-scan-runner");
 const catalogEnrichRunner = require("./lib/catalog-enrich-runner");
+const catalogPipeline = require("./lib/catalog-pipeline");
 const lifestyleRunner = require("./lib/lifestyle-runner");
 const orientationRunner = require("./lib/orientation-runner");
 const pythonSetup = require("./lib/python-setup");
@@ -117,7 +119,12 @@ const {
   listMarketplaceCollections,
   DEFAULT_TEMPLATE_DIR,
 } = require("./lib/marketplace/export-service");
-const artworkExtract = require("./lib/artwork-extract");
+const {
+  listCutouts,
+  convertCutouts,
+  uploadCutouts,
+} = require("./lib/index-cutout");
+const artworkPipeline = require("./lib/artwork-pipeline");
 
 const app = express();
 const PORT = process.env.PORT || 3847;
@@ -1108,6 +1115,51 @@ router.get("/api/catalog/shopify/status", (_req, res) => {
   }
 });
 
+router.get("/api/pipeline", (_req, res) => {
+  try {
+    res.json(catalogPipeline.buildList());
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to load the pipeline." });
+  }
+});
+
+router.post("/api/pipeline/detect", (req, res) => {
+  try {
+    res.json(catalogPipeline.detect(req.body || {}));
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to detect new paintings." });
+  }
+});
+
+router.post("/api/pipeline/process", (req, res) => {
+  try {
+    res.json(catalogPipeline.startProcess(req.body || {}));
+  } catch (error) {
+    const status = error.code === "JOB_RUNNING" ? 409 : 400;
+    res.status(status).json({ error: error.message || "Failed to start the pipeline." });
+  }
+});
+
+router.get("/api/pipeline/status", (_req, res) => {
+  res.json(catalogPipeline.getStatus());
+});
+
+router.get("/api/pipeline/preview", async (req, res) => {
+  try {
+    const filePath = catalogPipeline.resolvePreviewFile(req.query.file);
+    if (req.query.w != null && String(req.query.w).trim() !== "") {
+      const thumbPath = await getCatalogThumbnail(filePath, {
+        width: parseThumbWidth(req.query.w),
+      });
+      res.setHeader("Cache-Control", "private, max-age=3600");
+      return res.sendFile(thumbPath);
+    }
+    res.sendFile(filePath);
+  } catch (error) {
+    res.status(404).json({ error: error.message || "Image not found." });
+  }
+});
+
 router.get("/api/health", (_req, res) => {
   res.json({ ok: true, basePath: BASE_PATH });
 });
@@ -1377,6 +1429,18 @@ router.post("/api/sale/refresh", async (req, res) => {
   }
 });
 
+router.post("/api/sale/reapply", async (req, res) => {
+  try {
+    const result = await reapplySaleDiscounts({
+      discountMin: req.body?.discountMin,
+      discountMax: req.body?.discountMax,
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to reapply sale discounts." });
+  }
+});
+
 router.post("/api/sale/revert", async (req, res) => {
   try {
     const variantIds = Array.isArray(req.body?.variantIds)
@@ -1400,21 +1464,53 @@ router.get("/", (_req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, "index.html"));
 });
 
-router.get("/api/artwork-extract", (_req, res) => {
-  res.json(artworkExtract.getStatus());
+router.get("/api/index-cutout", (_req, res) => {
+  try {
+    res.json(listCutouts());
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to list index cutouts." });
+  }
 });
 
-router.get("/api/artwork-extract/list", async (req, res) => {
+router.post("/api/index-cutout/convert", async (req, res) => {
   try {
-    res.json(await artworkExtract.list({ input: String(req.query.input || "").trim() }));
+    const productIds = Array.isArray(req.body?.productIds) ? req.body.productIds : [];
+    const result = await convertCutouts(productIds);
+    res.json({ ...result, ...listCutouts() });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Cutout failed." });
+  }
+});
+
+router.post("/api/index-cutout/upload", async (req, res) => {
+  try {
+    const productIds = Array.isArray(req.body?.productIds) ? req.body.productIds : [];
+    const { storeDomain, accessToken } = getShopifyCredentials();
+    if (!storeDomain || !accessToken) {
+      return res.status(400).json({ error: "Shopify is not connected." });
+    }
+    const result = await uploadCutouts(storeDomain, accessToken, productIds);
+    res.json({ ...result, ...listCutouts() });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Upload failed." });
+  }
+});
+
+router.get("/api/artwork", (_req, res) => {
+  res.json(artworkPipeline.getStatus());
+});
+
+router.get("/api/artwork/list", async (req, res) => {
+  try {
+    res.json(await artworkPipeline.list({ input: String(req.query.input || "").trim() }));
   } catch (error) {
     res.status(400).json({ error: error.message || "Failed to list images." });
   }
 });
 
-router.get("/api/artwork-extract/thumb", async (req, res) => {
+router.get("/api/artwork/thumb", async (req, res) => {
   try {
-    const thumbPath = await artworkExtract.thumbnail({
+    const thumbPath = await artworkPipeline.thumbnail({
       key: String(req.query.key || ""),
       width: parseThumbWidth(req.query.w),
     });
@@ -1425,16 +1521,29 @@ router.get("/api/artwork-extract/thumb", async (req, res) => {
   }
 });
 
-router.post("/api/artwork-extract/start", (req, res) => {
+router.get("/api/artwork/file", (req, res) => {
   try {
-    res.json(artworkExtract.start(req.body || {}));
+    res.setHeader("Cache-Control", "no-cache");
+    res.sendFile(artworkPipeline.filePath({ key: String(req.query.key || "") }));
   } catch (error) {
-    res.status(400).json({ error: error.message || "Failed to start the extraction." });
+    res.status(404).json({ error: error.message || "Image not found." });
   }
 });
 
-router.post("/api/artwork-extract/stop", (_req, res) => {
-  res.json(artworkExtract.stop());
+router.post("/api/artwork/register", (req, res) => {
+  try {
+    res.json(artworkPipeline.start(req.body || {}));
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to register Raw images." });
+  }
+});
+
+router.post("/api/artwork/review", (req, res) => {
+  try {
+    res.json(artworkPipeline.review(req.body || {}));
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to save the review." });
+  }
 });
 
 app.use(BASE_PATH, router);

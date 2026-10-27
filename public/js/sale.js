@@ -130,9 +130,9 @@
     if (els.statusMeta) {
       if (!state.items.length) {
         els.statusMeta.textContent =
-          "Click Refresh to pick up to 50 XL Canvas Black/White variants.";
+          "Click Refresh to pick up to 200 L 24\"x36\" Canvas Black/White variants.";
       } else {
-        els.statusMeta.textContent = `Discount range ${state.discountMin}–${state.discountMax}% · XL 24"x36" Canvas · Black/White frame`;
+        els.statusMeta.textContent = `Discount range ${state.discountMin}–${state.discountMax}% · L 24"x36" Canvas · Black/White frame`;
       }
     }
 

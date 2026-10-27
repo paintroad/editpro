@@ -55,7 +55,11 @@ function normalizeFrame(frame) {
   if (f === "wooden-finish") {
     return "wooden";
   }
-  if (f === "dark-wood-finish" || f === "dark-wood") {
+  if (
+    f === "dark-wood-finish" ||
+    f === "dark-wood" ||
+    f === "dark-brown"
+  ) {
     return "dark-wood";
   }
   if (f === "stretched-canvas" || f === "stretchedcanvas") {

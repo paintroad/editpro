@@ -30,15 +30,15 @@ def _span(rect, side):
     return (y1 - y0) if side in ("top", "bottom") else (x1 - x0)
 
 
-def _is_light(color):
-    return color.min() >= 180 and color.max() - color.min() <= 45
+def _is_light(color, light_min=180):
+    return color.min() >= light_min and color.max() - color.min() <= 45
 
 
 def _is_dark(color):
     return color.max() <= 75
 
 
-def _band(arr, rect, side, start, kind, limit):
+def _band(arr, rect, side, start, kind, limit, light_min=180):
     """Depth of a uniform light or dark band starting `start` lines in from `side`."""
     span = _span(rect, side)
     depth = 0
@@ -48,7 +48,7 @@ def _band(arr, rect, side, start, kind, limit):
         line = _line(arr, rect, side, start + depth).astype(np.int16)
         median = np.median(line, axis=0)
         if color is None:
-            if not (_is_light(median) if kind == "light" else _is_dark(median)):
+            if not (_is_light(median, light_min) if kind == "light" else _is_dark(median)):
                 return 0
             color = median
         match = (np.abs(line - color).max(axis=1) <= tol).mean()
@@ -70,8 +70,9 @@ def _shrink(rect, side, depth):
     return (x0, y0, x1 - depth, y1)
 
 
-def trim_rect(arr):
-    """Returns (rect, peeled) on `arr` (H x W x 3 uint8)."""
+def trim_rect(arr, light_min=180):
+    """Returns (rect, peeled) on `arr` (H x W x 3 uint8). `light_min` is the darkest channel value
+    still treated as a light margin."""
     h, w = arr.shape[:2]
     rect = (0, 0, w, h)
     for _ in range(4):
@@ -81,12 +82,12 @@ def trim_rect(arr):
             limit = int(full * MAX_PEEL)
             dark = _band(arr, rect, side, 0, "dark", int(full * FRAME_DARK) + 1)
             if dark:
-                light_after = _band(arr, rect, side, dark, "light", limit)
+                light_after = _band(arr, rect, side, dark, "light", limit, light_min)
                 if dark <= full * THIN_DARK or light_after >= 2:
                     rect = _shrink(rect, side, dark + light_after)
                     changed = True
                     continue
-            light = _band(arr, rect, side, 0, "light", limit)
+            light = _band(arr, rect, side, 0, "light", limit, light_min)
             if light:
                 rect = _shrink(rect, side, light)
                 changed = True

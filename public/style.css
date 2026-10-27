@@ -2130,6 +2130,7 @@ html.dark .collections-live-badge {
 }
 
 #module-catalog.catalog-builder-module,
+#module-pipeline.catalog-builder-module,
 #module-artwork.catalog-builder-module {
   display: flex;
   flex-direction: column;
@@ -2142,6 +2143,7 @@ html.dark .collections-live-badge {
 }
 
 #module-catalog .card,
+#module-pipeline .card,
 #module-artwork .card {
   border-radius: 0;
   padding: 0;
@@ -2191,6 +2193,7 @@ html.dark .collections-live-badge {
 }
 
 #module-catalog .message.seo-toast,
+#module-pipeline .message.seo-toast,
 #module-artwork .message.seo-toast {
   margin: 0;
   border-radius: 0;
@@ -2198,6 +2201,7 @@ html.dark .collections-live-badge {
 }
 
 #module-catalog .catalog-builder-path-card,
+#module-pipeline .catalog-builder-path-card,
 #module-artwork .catalog-builder-path-card {
   flex-shrink: 0;
   padding: 10px 16px;
@@ -2346,6 +2350,7 @@ html.dark .collections-live-badge {
 }
 
 #module-catalog .catalog-builder-list-card,
+#module-pipeline .catalog-builder-list-card,
 #module-artwork .catalog-builder-list-card {
   flex: 1;
   min-height: 0;
@@ -2520,6 +2525,7 @@ html.dark .collections-live-badge {
 }
 
 #module-catalog .catalog-builder-table-wrap,
+#module-pipeline .catalog-builder-table-wrap,
 #module-artwork .catalog-builder-table-wrap {
   flex: 1;
   min-height: 0;
@@ -3171,7 +3177,7 @@ tbody tr:last-child td {
 
 .square-action-bar {
   display: flex;
-  align-items: flex-start;
+    align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 12px;
@@ -3421,7 +3427,7 @@ html.dark .score-poor {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+    gap: 12px;
   padding: 16px 20px;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--surface-raised);
@@ -3585,7 +3591,7 @@ html.dark .score-poor {
 
 #module-labels.labels-module {
   display: flex;
-  flex-direction: column;
+    flex-direction: column;
   gap: 12px;
   flex: 1;
   min-height: 0;
@@ -4350,7 +4356,7 @@ html.dark .score-poor {
 
 .artwork-form {
   display: grid;
-  grid-template-columns: 3fr 1fr auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   align-items: end;
 }
@@ -4380,10 +4386,6 @@ html.dark .score-poor {
 
 .artwork-table .artwork-thumb {
   object-fit: contain;
-}
-
-.artwork-table .artwork-thumb--source {
-  opacity: 0.55;
 }
 
 .artwork-table .artwork-name {
@@ -4432,4 +4434,28 @@ html.dark .score-poor {
   width: 0;
   background: var(--accent);
   transition: width 0.3s ease;
+}
+
+.artwork-review {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 220px;
+}
+
+.artwork-review-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.artwork-review-note {
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8125rem;
+  resize: vertical;
 }
