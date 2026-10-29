@@ -27,6 +27,48 @@ PLACEHOLDER_MORPH_KERNEL = 11
 PLACEHOLDER_MAT_INSET_PX = 8
 QUAD_MIN_ASPECT_RATIO = 0.3
 QUAD_MAX_ASPECT_RATIO = 3.0
+# "contain" never crops the painting: spare window space becomes mat. "cover" fills and crops.
+PAINTING_FIT_MODE = os.environ.get("EDITPRO_PAINTING_FIT_MODE", "contain").strip().lower()
+PAINTING_MAT_BGR = (255, 255, 255)
+PAINTING_MAX_CROP = 0.03
+# Room frames that could not be reshaped all the way may crop this much of the painting so it
+# still fills the window edge to edge; only shapes further off are padded.
+ROOM_MAX_CROP = float(os.environ.get("EDITPRO_ROOM_MAX_CROP", "0.10"))
+# Extra mat on room frames, as a share of the window's shorter side. 0 because the room
+# templates are built with their own mat and windows already shaped to the painting.
+ROOM_MAT_RATIO = float(os.environ.get("EDITPRO_ROOM_MAT_RATIO", "0"))
+# Reshape the template frame to the painting's own shape (straight-on frames only), so the
+# painting fills the window exactly instead of being padded or cropped.
+FRAME_ADAPT = os.environ.get("EDITPRO_FRAME_ADAPT", "1") != "0"
+# Largest share of the window's width or height that may be removed when reshaping.
+FRAME_ADAPT_MAX = 0.45
+FRAME_EDGE_STEP = 9
+FRAME_EDGE_REACH = 0.3
+FRAME_SHADOW_MARGIN = 24
+# The wall next to a frame is too busy to extend when more than FRAME_WALL_MAX_EDGES of its
+# pixels have a brightness step above FRAME_WALL_MAX_GRADIENT.
+FRAME_WALL_MAX_GRADIENT = 10.0
+FRAME_WALL_MAX_EDGES = 0.004
+# How far past the window the grey band round a canvas or edge-to-edge frame may reach, and
+# the brightness step that marks where it meets wall, shadow or moulding.
+CANVAS_EDGE_REACH = 9
+CANVAS_EDGE_MIN_STEP = 6.0
+# Matted rooms (meta.mat): "cover" runs the painting over the mat to the moulding, "thin" leaves
+# a mat of MAT_THIN_SHARE of the painting's shorter side. MAT_REACH bounds the mat search (share
+# of the window) and MAT_STEP is the brightness change where mat meets moulding.
+MAT_THIN_SHARE = 0.035
+MAT_REACH = 0.6
+MAT_STEP = 22.0
+# Rooms with meta.grow: a frame whose block (moulding included) spans less than
+# FRAME_GROW_TARGET of the picture's width or height grows over plain wall, by at most
+# FRAME_GROW_MAX of its size.
+FRAME_GROW_TARGET = 0.40
+FRAME_GROW_MAX = 0.35
+# Mouldings wider than meta.mouldingMax (share of the painting's shorter side) are thinned from
+# the inside: the painting or mat runs further out and the frame's outer edge stays.
+# EDITPRO_MOULDING_MAX overrides it for every room, for trying other widths.
+_moulding_env = os.environ.get("EDITPRO_MOULDING_MAX", "").strip()
+MOULDING_MAX = float(_moulding_env) if _moulding_env else None
 
 # Blend defaults. blendMode "scene" imparts the frame's normalized lighting/shadow
 # onto the painting; "multiply" reproduces the exact old frame*paint/255 behavior.
@@ -74,29 +116,43 @@ def load_frame_quads() -> dict:
     return payload.get("quads") or {}
 
 
-def stored_quad_for(
-    orientation: Optional[str],
-    frame_template: Optional[str],
-    canvas_size: int = CANVAS_SIZE,
-    frame_set: Optional[str] = None,
-) -> Optional[np.ndarray]:
-    orientation_label = _normalize_orientation_label(orientation)
+def _quad_entry(orientation: Optional[str], frame_template: Optional[str], frame_set: Optional[str]) -> Optional[dict]:
     template = str(frame_template or "").strip()
     if not template:
         return None
-
+    orientation_label = _normalize_orientation_label(orientation)
     quads = load_frame_quads()
     lookup_keys: list[str] = []
     if frame_set:
         lookup_keys.append(str(frame_set).strip())
     if orientation_label:
         lookup_keys.append(orientation_label)
-
-    entry = None
     for key in lookup_keys:
         entry = (quads.get(key) or {}).get(template)
         if entry:
-            break
+            return entry
+    return None
+
+
+def room_meta(orientation: Optional[str], frame_template: Optional[str], frame_set: Optional[str] = None) -> dict:
+    entry = _quad_entry(orientation, frame_template, frame_set)
+    return (entry or {}).get("meta") or {}
+
+
+def fills_to_edge(orientation: Optional[str], frame_template: Optional[str], frame_set: Optional[str] = None) -> bool:
+    """Stretched canvases and edge-to-edge (no mat) frames: the painting reaches the canvas edge
+    or the moulding, with no grey left between."""
+    meta = room_meta(orientation, frame_template, frame_set)
+    return bool(meta.get("canvas") or meta.get("edgeToEdge"))
+
+
+def stored_quad_for(
+    orientation: Optional[str],
+    frame_template: Optional[str],
+    canvas_size: int = CANVAS_SIZE,
+    frame_set: Optional[str] = None,
+) -> Optional[np.ndarray]:
+    entry = _quad_entry(orientation, frame_template, frame_set)
     if not entry:
         return None
 
@@ -139,29 +195,6 @@ def fallback_rect(size: int) -> np.ndarray:
         ],
         dtype=np.float32,
     )
-
-
-def detect_painting_content(painting_bgr: np.ndarray) -> np.ndarray:
-    h, w = painting_bgr.shape[:2]
-    # Vectorized luminance from BGR channels (matches luminance(): 0.299R + 0.587G + 0.114B).
-    frame_f = painting_bgr.astype(np.float32)
-    lum = 0.114 * frame_f[..., 0] + 0.587 * frame_f[..., 1] + 0.299 * frame_f[..., 2]
-    dark = lum < DARK_THRESHOLD
-
-    if not np.any(dark):
-        pad = max(2, int(min(h, w) * 0.02))
-        return painting_bgr[pad : h - pad, pad : w - pad]
-
-    ys, xs = np.where(dark)
-    min_x, max_x = int(xs.min()), int(xs.max())
-    min_y, max_y = int(ys.min()), int(ys.max())
-
-    pad = 2
-    min_x = max(0, min_x - pad)
-    min_y = max(0, min_y - pad)
-    max_x = min(w - 1, max_x + pad)
-    max_y = min(h - 1, max_y + pad)
-    return painting_bgr[min_y : max_y + 1, min_x : max_x + 1]
 
 
 def _ensure_canvas(frame_bgr: np.ndarray, canvas_size: int) -> np.ndarray:
@@ -840,15 +873,58 @@ def _resize_painting(painting_bgr: np.ndarray, width: int, height: int) -> np.nd
     return cv2.resize(painting_bgr, (width, height), interpolation=interpolation)
 
 
-def fit_painting_to_quad(painting_bgr: np.ndarray, quad: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    """Cover-fit painting into quad bbox: scale to fill, center-crop overflow axis."""
+def _trim_towards_aspect(painting_bgr: np.ndarray, target_ar: float, max_crop: float) -> np.ndarray:
+    """Center-crop at most max_crop of one dimension to bring the painting closer to target_ar."""
+    ph, pw = painting_bgr.shape[:2]
+    if ph <= 0 or pw <= 0 or max_crop <= 0:
+        return painting_bgr
+    paint_ar = pw / ph
+    if paint_ar > target_ar:
+        keep_w = max(int(round(pw * (1.0 - max_crop))), int(round(ph * target_ar)))
+        x0 = (pw - keep_w) // 2
+        return painting_bgr[:, x0 : x0 + keep_w]
+    keep_h = max(int(round(ph * (1.0 - max_crop))), int(round(pw / target_ar)))
+    y0 = (ph - keep_h) // 2
+    return painting_bgr[y0 : y0 + keep_h, :]
+
+
+def fit_painting_to_quad(
+    painting_bgr: np.ndarray, quad: np.ndarray, mat_ratio: float = 0.0, max_crop: float = PAINTING_MAX_CROP
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Fit painting into quad bbox. "contain" crops at most max_crop to match the
+    window shape, then keeps the whole painting inside an even mat of mat_ratio (share of the
+    window's shorter side) on every edge, with any remaining space added to the short axis.
+    "cover" scales to fill and center-crops the overflow axis."""
     max_w, max_h = _quad_dimensions(quad)
     max_w = max(int(max_w), 1)
     max_h = max(int(max_h), 1)
 
+    if PAINTING_FIT_MODE == "contain":
+        mat = int(round(min(max_w, max_h) * max(mat_ratio, 0.0)))
+        inner_w = max(max_w - 2 * mat, 1)
+        inner_h = max(max_h - 2 * mat, 1)
+        painting_bgr = _trim_towards_aspect(painting_bgr, inner_w / inner_h, max_crop)
+        ph, pw = painting_bgr.shape[:2]
+        scale = min(inner_w / pw, inner_h / ph)
+        new_w = min(max(int(round(pw * scale)), 1), inner_w)
+        new_h = min(max(int(round(ph * scale)), 1), inner_h)
+        resized = _resize_painting(painting_bgr, new_w, new_h)
+        fill = PAINTING_MAT_BGR
+        if (new_w < max_w or new_h < max_h) and mat == 0:
+            # Spare space takes the painting's own edge colour rather than a white band.
+            edge = np.concatenate([resized[0], resized[-1], resized[:, 0], resized[:, -1]])
+            fill = tuple(int(v) for v in np.median(edge, axis=0))
+        fitted = np.full((max_h, max_w, 3), fill, dtype=np.uint8)
+        x0 = (max_w - new_w) // 2
+        y0 = (max_h - new_h) // 2
+        fitted[y0 : y0 + new_h, x0 : x0 + new_w] = resized
+        warped = _warp_rect_to_quad(fitted, quad, CANVAS_SIZE)
+        geom_mask_color = _warp_rect_to_quad(np.full_like(fitted, 255, dtype=np.uint8), quad, CANVAS_SIZE)
+        geom_mask = cv2.cvtColor(geom_mask_color, cv2.COLOR_BGR2GRAY)
+        _, geom_mask = cv2.threshold(geom_mask, 1, 255, cv2.THRESH_BINARY)
+        return warped, geom_mask
+
     ph, pw = painting_bgr.shape[:2]
-    paint_ar = pw / ph if ph > 0 else 1.0
-    quad_ar = max_w / max_h if max_h > 0 else 1.0
     scale_w = max_w / pw if pw > 0 else 1.0
     scale_h = max_h / ph if ph > 0 else 1.0
     scale = max(scale_w, scale_h)
@@ -981,6 +1057,528 @@ def _save_composite(result_bgr, output_path: str, jpeg_quality: int, alpha=None,
         raise
 
 
+def _last_edge(profile: np.ndarray) -> int:
+    """Distance from the window to the outermost sharp brightness change (frame edge or shadow)."""
+    if profile.size < 8:
+        return 0
+    p = np.convolve(profile, np.ones(3) / 3.0, mode="same")
+    k = np.nonzero(np.abs(p[4:] - p[:-4]) > FRAME_EDGE_STEP)[0] + 2
+    k = k[(k >= 3) & (k < profile.size - 3)]
+    return int(k.max()) + 3 if k.size else 0
+
+
+def _frame_border(lum: np.ndarray, win: Tuple[int, int, int, int]) -> Tuple[int, int]:
+    x0, y0, x1, y1 = win
+    height, width = lum.shape
+    w, h = x1 - x0 + 1, y1 - y0 + 1
+    reach_x, reach_y = int(w * FRAME_EDGE_REACH), int(h * FRAME_EDGE_REACH)
+    sides = []
+    for f in (0.3, 0.5, 0.7):
+        y = y0 + int(h * f)
+        sides.append(_last_edge(lum[y, max(0, x0 - reach_x) : x0][::-1]))
+        sides.append(_last_edge(lum[y, x1 + 1 : min(width, x1 + 1 + reach_x)]))
+    tops = [_last_edge(lum[max(0, y0 - reach_y) : y0, x0 + int(w * f)][::-1]) for f in (0.3, 0.5, 0.7)]
+    side, top = int(np.median(sides)), int(np.median(tops))
+    # Mouldings are even all round; a very different top reading is a lamp or shelf above.
+    if abs(top - side) > 0.5 * side:
+        top = side
+    return side, top
+
+
+def _axis_aligned_window(quad: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
+    q = np.asarray(quad, dtype=np.float32)
+    skew = max(abs(q[0, 1] - q[1, 1]), abs(q[3, 1] - q[2, 1]), abs(q[0, 0] - q[3, 0]), abs(q[1, 0] - q[2, 0]))
+    if skew > 2:
+        return None
+    # Stored quads sit 1 px outside the grey window.
+    return (
+        int(round(q[:, 0].min())) + 1,
+        int(round(q[:, 1].min())) + 1,
+        int(round(q[:, 0].max())) - 1,
+        int(round(q[:, 1].max())) - 1,
+    )
+
+
+def expand_to_edge(frame_bgr: np.ndarray, quad: np.ndarray) -> np.ndarray:
+    """The placeholder window stops a few pixels short of a stretched canvas's edge or an
+    edge-to-edge frame's moulding, leaving a thin grey band. The quad is pushed out on each side
+    to the step where that band meets wall, shadow or moulding, so the painting runs to the edge.
+    The band is often a darker rim in the template; it takes the brightness of the face next to
+    it, or scene shading would draw it on a light painting as a grey border.
+    Returns (frame_bgr, quad)."""
+    win = _axis_aligned_window(quad)
+    if win is None:
+        return frame_bgr, quad
+    x0, y0, x1, y1 = win
+    h, w = frame_bgr.shape[:2]
+    lum = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    ym = slice(y0 + (y1 - y0) // 4, y1 - (y1 - y0) // 4)
+    xm = slice(x0 + (x1 - x0) // 4, x1 - (x1 - x0) // 4)
+    profiles = {
+        "left": lum[ym, max(0, x0 - CANVAS_EDGE_REACH) : x0].mean(axis=0)[::-1],
+        "right": lum[ym, x1 + 1 : min(w, x1 + 1 + CANVAS_EDGE_REACH)].mean(axis=0),
+        "top": lum[max(0, y0 - CANVAS_EDGE_REACH) : y0, xm].mean(axis=1)[::-1],
+        "bottom": lum[y1 + 1 : min(h, y1 + 1 + CANVAS_EDGE_REACH), xm].mean(axis=1),
+    }
+    ring = {}
+    for name, p in profiles.items():
+        steps = np.abs(np.diff(p)) if p.size > 1 else np.zeros(0)
+        ring[name] = int(np.argmax(steps)) + 1 if steps.size and steps.max() >= CANVAS_EDGE_MIN_STEP else 0
+    out, box = _extend_box(frame_bgr, win, ring)
+    return out, _quad_for_box(box)
+
+
+def _quad_for_box(box: Tuple[int, int, int, int]) -> np.ndarray:
+    x0, y0, x1, y1 = box
+    return np.array([[x0 - 1, y0 - 1], [x1 + 1, y0 - 1], [x1 + 1, y1 + 1], [x0 - 1, y1 + 1]], dtype=np.float32)
+
+
+def _extend_box(frame_bgr: np.ndarray, box: Tuple[int, int, int, int], ring: dict):
+    """Push a box out by ring[side] px per side, filling the new band with the box's own edge
+    pixels (taken 2 px inside, past its 1 px outline). Returns (frame_bgr, new box)."""
+    x0, y0, x1, y1 = box
+    nx0, ny0 = x0 - ring["left"], y0 - ring["top"]
+    nx1, ny1 = x1 + ring["right"], y1 + ring["bottom"]
+    out = frame_bgr.copy()
+    # Columns first over the box's rows, then rows over the full new width (fills corners).
+    if ring["left"]:
+        out[y0 : y1 + 1, nx0 - 1 : x0 + 1] = out[y0 : y1 + 1, x0 + 2 : x0 + 3]
+    if ring["right"]:
+        out[y0 : y1 + 1, x1 : nx1 + 2] = out[y0 : y1 + 1, x1 - 2 : x1 - 1]
+    if ring["top"]:
+        out[ny0 - 1 : y0 + 1, nx0 - 1 : nx1 + 2] = out[y0 + 2 : y0 + 3, nx0 - 1 : nx1 + 2]
+    if ring["bottom"]:
+        out[y1 : ny1 + 2, nx0 - 1 : nx1 + 2] = out[y1 - 2 : y1 - 1, nx0 - 1 : nx1 + 2]
+    return out, (nx0, ny0, nx1, ny1)
+
+
+def _moulding_width(frame_bgr: np.ndarray, box: Tuple[int, int, int, int]) -> int:
+    """Width of the moulding round a box that starts at the moulding's inner edge: where the
+    colour, walking out, stays closer to the wall than to the moulding. Read on the top, left
+    and right (the bottom often carries shadow or a shelf); 0 when unclear."""
+    x0, y0, x1, y1 = box
+    h, w = frame_bgr.shape[:2]
+    bw, bh = x1 - x0 + 1, y1 - y0 + 1
+    reach = int(0.25 * min(bw, bh))
+    lab = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
+    ym = slice(y0 + bh // 4, y1 - bh // 4)
+    xm = slice(x0 + bw // 4, x1 - bw // 4)
+    profiles = [
+        lab[max(0, y0 - reach) : y0, xm].mean(axis=1)[::-1],
+        lab[ym, max(0, x0 - reach) : x0].mean(axis=0)[::-1],
+        lab[ym, x1 + 1 : min(w, x1 + 1 + reach)].mean(axis=0),
+    ]
+    widths = []
+    for p in profiles:
+        if len(p) < reach or reach < 12:
+            return 0
+        wall = np.median(p[-6:], axis=0)
+        d_wall = np.linalg.norm(p - wall, axis=1)
+        inner = int(0.6 * len(p))
+        mould = p[int(np.argmax(d_wall[:inner]))]
+        if d_wall[:inner].max() < 20:
+            return 0
+        d_mould = np.linalg.norm(p - mould, axis=1)
+        wallish = d_wall < d_mould
+        # First position from which the profile stays wall-like to the end.
+        stays = np.flip(np.logical_and.accumulate(np.flip(wallish)))
+        idx = np.nonzero(stays)[0]
+        if not idx.size or idx[0] >= len(p) - 6:
+            return 0
+        widths.append(int(idx[0]))
+    return int(np.median(widths))
+
+
+def thin_moulding(frame_bgr: np.ndarray, box: Tuple[int, int, int, int], max_share: float, short_side: int):
+    """Cover the inside of a moulding wider than max_share of short_side with the box's edge
+    pixels, so only an outer strip of max_share is left. Returns (frame_bgr, box)."""
+    width = _moulding_width(frame_bgr, box)
+    keep = max(4, int(round(max_share * short_side)))
+    cut = width - keep
+    if cut < 3:
+        return frame_bgr, box
+    return _extend_box(frame_bgr, box, {"left": cut, "right": cut, "top": cut, "bottom": cut})
+
+
+def _mat_widths(lum: np.ndarray, win: Tuple[int, int, int, int]) -> Optional[dict]:
+    """Per side, how far the mat runs from the window to the moulding, or None when no clear
+    mat-to-moulding step is found on every side."""
+    x0, y0, x1, y1 = win
+    h, w = lum.shape
+    ww, wh = x1 - x0 + 1, y1 - y0 + 1
+    reach = int(MAT_REACH * min(ww, wh))
+    ym = slice(y0 + wh // 4, y1 - wh // 4)
+    xm = slice(x0 + ww // 4, x1 - ww // 4)
+    profiles = {
+        "left": lum[ym, max(0, x0 - reach) : x0].mean(axis=0)[::-1],
+        "right": lum[ym, x1 + 1 : min(w, x1 + 1 + reach)].mean(axis=0),
+        "top": lum[max(0, y0 - reach) : y0, xm].mean(axis=1)[::-1],
+        "bottom": lum[y1 + 1 : min(h, y1 + 1 + reach), xm].mean(axis=1),
+    }
+    widths = {}
+    for name, p in profiles.items():
+        if p.size < 20:
+            return None
+        p = np.convolve(p, np.ones(3) / 3.0, mode="same")
+        # Past the bevel, the mat is flat; the moulding is the first lasting step away from it.
+        ref = float(np.median(p[5:15]))
+        off = np.abs(p - ref) > MAT_STEP
+        found = [i for i in range(15, p.size - 3) if off[i] and off[i + 1] and off[i + 2]]
+        if not found:
+            return None
+        widths[name] = found[0]
+    return widths
+
+
+def narrow_mat(frame_bgr: np.ndarray, quad: np.ndarray, keep_share: float, moulding_max: Optional[float] = None):
+    """Run the painting over a matted frame's mat, leaving keep_share of the new window's
+    shorter side as mat. The covered window and bevel are repainted from the mat around them
+    and smoothed, so scene shading keeps the room's light falloff without the old window's
+    outline. Returns (frame_bgr, quad), unchanged when no mat is found."""
+    win = _axis_aligned_window(quad)
+    if win is None:
+        return frame_bgr, quad
+    x0, y0, x1, y1 = win
+    lum = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    mat = _mat_widths(lum, win)
+    if mat is None:
+        return frame_bgr, quad
+    nx0, ny0, nx1, ny1 = x0 - mat["left"], y0 - mat["top"], x1 + mat["right"], y1 + mat["bottom"]
+    if moulding_max:
+        # The mat spreads over the inside of a thick moulding before it is narrowed.
+        short = min(nx1 - nx0 + 1, ny1 - ny0 + 1)
+        frame_bgr, (nx0, ny0, nx1, ny1) = thin_moulding(frame_bgr, (nx0, ny0, nx1, ny1), moulding_max, short)
+    # A covered mat tucks the painting just under the moulding's lip so no mat line shows.
+    keep = int(round(keep_share * min(nx1 - nx0 + 1, ny1 - ny0 + 1))) if keep_share > 0 else -2
+    nx0, ny0, nx1, ny1 = nx0 + keep, ny0 + keep, nx1 - keep, ny1 - keep
+
+    pad = 12
+    cx0, cy0 = max(0, nx0 - pad), max(0, ny0 - pad)
+    cx1, cy1 = min(frame_bgr.shape[1] - 1, nx1 + pad), min(frame_bgr.shape[0] - 1, ny1 + pad)
+    crop = frame_bgr[cy0 : cy1 + 1, cx0 : cx1 + 1]
+    hole = np.zeros(crop.shape[:2], np.uint8)
+    bevel = 6
+    hole[
+        max(0, y0 - bevel - cy0) : y1 + bevel - cy0 + 1,
+        max(0, x0 - bevel - cx0) : x1 + bevel - cx0 + 1,
+    ] = 255
+    filled = cv2.inpaint(crop, hole, 5, cv2.INPAINT_TELEA).astype(np.float32)
+    # Blur within the mat only, so the dark moulding does not bleed into the painting's edge.
+    inside = np.zeros(crop.shape[:2], np.float32)
+    inside[ny0 - cy0 + 2 : ny1 - cy0 - 1, nx0 - cx0 + 2 : nx1 - cx0 - 1] = 1.0
+    weight = cv2.GaussianBlur(inside, (0, 0), 10)[..., None]
+    smooth = cv2.GaussianBlur(filled * inside[..., None], (0, 0), 10) / np.maximum(weight, 1e-3)
+    smooth = np.clip(smooth, 0, 255).astype(np.uint8)
+    out = frame_bgr.copy()
+    out[ny0 : ny1 + 1, nx0 : nx1 + 1] = smooth[ny0 - cy0 : ny1 - cy0 + 1, nx0 - cx0 : nx1 - cx0 + 1]
+    new_quad = np.array([[nx0 - 1, ny0 - 1], [nx1 + 1, ny0 - 1], [nx1 + 1, ny1 + 1], [nx0 - 1, ny1 + 1]], dtype=np.float32)
+    return out, new_quad
+
+
+def enlarge_frame(frame_bgr: np.ndarray, quad: np.ndarray, target: float = FRAME_GROW_TARGET):
+    """Grow a straight-on frame that looks small in its room, keeping its shape and moulding,
+    as far as the plain wall around it allows. Returns (frame_bgr, quad) or None."""
+    win = _axis_aligned_window(quad)
+    if win is None:
+        return None
+    x0, y0, x1, y1 = win
+    canvas_h, canvas_w = frame_bgr.shape[:2]
+    lum = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    side, top = _frame_border(lum, win)
+    if x0 - side < 0 or y0 - top < 0 or x1 + side >= canvas_w or y1 + top >= canvas_h:
+        return None
+    bw, bh = x1 - x0 + 1 + 2 * side, y1 - y0 + 1 + 2 * top
+    share = max(bw / canvas_w, bh / canvas_h)
+    if share >= target:
+        return None
+    g = min(target / share, 1.0 + FRAME_GROW_MAX) - 1.0
+    want = {"x": int(round(bw * g)), "y": int(round(bh * g))}
+    m = FRAME_SHADOW_MARGIN
+
+    def axes(img):
+        lm = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        box = (max(0, x0 - side - m), max(0, y0 - top - m), min(canvas_w - 1, x1 + side + m), min(canvas_h - 1, y1 + top + m))
+        return {
+            "y": (img, lm, box, (y0, y1)),
+            "x": (img.swapaxes(0, 1), lm.T, (box[1], box[0], box[3], box[2]), (x0, x1)),
+        }
+
+    # Grow both axes by the same fraction of what each wants, so the frame keeps its shape.
+    a = axes(frame_bgr)
+    frac = 1.0
+    for axis in ("x", "y"):
+        if want[axis] <= 0:
+            return None
+        split = _frame_split(a[axis][1], a[axis][2], want[axis], True)
+        if split is None:
+            return None
+        frac = min(frac, sum(split) / want[axis])
+    if frac * min(want.values()) < 6:
+        return None
+    img = frame_bgr
+    for axis in ("y", "x"):
+        a_img, a_lum, a_box, a_win = axes(img)[axis]
+        amount = int(round(want[axis] * frac))
+        above, below = _frame_split(a_lum, a_box, amount, True)
+        out, (n0, n1) = _resize_frame_rows(a_img, a_box, a_win, above, below, False, True)
+        img = np.ascontiguousarray(out if axis == "y" else out.swapaxes(0, 1))
+        if axis == "y":
+            y0, y1 = n0, n1
+        else:
+            x0, x1 = n0, n1
+    new_quad = np.array([[x0 - 1, y0 - 1], [x1 + 1, y0 - 1], [x1 + 1, y1 + 1], [x0 - 1, y1 + 1]], dtype=np.float32)
+    return img, new_quad
+
+
+def _busy(lum: np.ndarray) -> bool:
+    """True when the wall strip holds objects (any real edges), not just plaster texture."""
+    if lum.shape[0] < 3 or lum.shape[1] < 3:
+        return True
+    smooth = cv2.GaussianBlur(np.ascontiguousarray(lum), (0, 0), 1.2)
+    grad = np.abs(np.diff(smooth, axis=1))[:-1] + np.abs(np.diff(smooth, axis=0))[:, :-1]
+    return float((grad > FRAME_WALL_MAX_GRADIENT).mean()) > FRAME_WALL_MAX_EDGES
+
+
+def adapt_frame_to_painting(
+    frame_bgr: np.ndarray, frame_alpha: Optional[np.ndarray], quad: np.ndarray, painting_ar: float
+):
+    """Reshape a straight-on frame so its window has the painting's aspect ratio.
+
+    The frame block (moulding, mat, window and a shadow margin) is cut or extended through its
+    middle, so moulding and mat keep their thickness. A frame grows over plain wall or shrinks
+    (the freed wall is filled by mirroring the plain wall beside it). The change is split between
+    the two sides by how much plain wall each has. When neither growing nor shrinking alone is
+    possible, the frame grows as far as the wall allows and shrinks along the other axis for the
+    rest. Returns (frame_bgr, frame_alpha, quad) or None when nothing could be changed."""
+    win = _axis_aligned_window(quad)
+    if win is None or painting_ar <= 0:
+        return None
+    x0, y0, x1, y1 = win
+    if x1 - x0 < 19 or y1 - y0 < 19:
+        return None
+    tolerance = np.log(1.0 + PAINTING_MAX_CROP)
+    if abs(np.log(painting_ar * (y1 - y0 + 1) / (x1 - x0 + 1))) <= tolerance:
+        return None
+
+    canvas_h, canvas_w = frame_bgr.shape[:2]
+    lum0 = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    if frame_alpha is not None:
+        lum0 = np.where(frame_alpha < 128, 255.0, lum0)
+    side, top = _frame_border(lum0, win)
+    if x0 - side < 0 or y0 - top < 0 or x1 + side >= canvas_w or y1 + top >= canvas_h:
+        return None
+    check = frame_alpha is None
+    img = frame_bgr if frame_alpha is None else np.dstack([frame_bgr, frame_alpha])
+    m = FRAME_SHADOW_MARGIN
+    changed = False
+
+    for _ in range(2):
+        w, h = x1 - x0 + 1, y1 - y0 + 1
+        window_ar = w / h
+        if abs(np.log(painting_ar / window_ar)) <= tolerance:
+            break
+        lum = cv2.cvtColor(img[:, :, :3], cv2.COLOR_BGR2GRAY).astype(np.float32)
+        if frame_alpha is not None:
+            lum = np.where(img[:, :, 3] < 128, 255.0, lum)
+        box = (max(0, x0 - side - m), max(0, y0 - top - m), min(canvas_w - 1, x1 + side + m), min(canvas_h - 1, y1 + top + m))
+        # Each axis is handled as rows; columns work on the transposed image.
+        axes = {
+            "y": (img, lum, box, (y0, y1), h),
+            "x": (img.swapaxes(0, 1), lum.T, (box[1], box[0], box[3], box[2]), (x0, x1), w),
+        }
+        if painting_ar < window_ar:
+            plans = [("y", int(round(w / painting_ar - h))), ("x", -int(round(w - h * painting_ar)))]
+        else:
+            plans = [("x", int(round(h * painting_ar - w))), ("y", -int(round(h - w / painting_ar)))]
+
+        best = None
+        for axis, change in plans:
+            a_img, a_lum, a_box, a_win, span = axes[axis]
+            change = int(np.sign(change)) * min(abs(change), int(span * FRAME_ADAPT_MAX))
+            if change == 0:
+                continue
+            split = _frame_split(a_lum, a_box, change, check)
+            if split is None:
+                continue
+            above, below = split
+            done = above + below
+            if best is None or done > best[3]:
+                best = (axis, change, (above, below), done)
+            if done == abs(change):
+                break
+        if best is None or best[3] < 2:
+            break
+        axis, change, (above, below), _ = best
+        a_img, a_lum, a_box, a_win, _ = axes[axis]
+        out, (n0, n1) = _resize_frame_rows(a_img, a_box, a_win, above, below, change < 0, check)
+        img = out if axis == "y" else out.swapaxes(0, 1)
+        if axis == "x":
+            x0, x1 = n0, n1
+        else:
+            y0, y1 = n0, n1
+        changed = True
+
+    if not changed:
+        return None
+    new_quad = np.array([[x0 - 1, y0 - 1], [x1 + 1, y0 - 1], [x1 + 1, y1 + 1], [x0 - 1, y1 + 1]], dtype=np.float32)
+    img = np.ascontiguousarray(img)
+    if frame_alpha is None:
+        return img, None, new_quad
+    return img[:, :, :3].copy(), img[:, :, 3].copy(), new_quad
+
+
+def _plain_reach(lum, cols, start, step, limit):
+    """How many rows from `start` (going up when step < 0) stay plain wall, up to `limit`."""
+    height = lum.shape[0]
+    room = start if step < 0 else height - start
+    limit = min(limit, room)
+    reach = 0
+    for n in list(range(4, limit, 4)) + [limit]:
+        a, b = (start - n, start) if step < 0 else (start, start + n)
+        if n <= 0 or _busy(lum[a:b, cols]):
+            break
+        reach = n
+    return reach
+
+
+def _frame_split(lum, box, change, check_wall):
+    """Rows (above, below) a frame block can grow or shrink by, at most |change| in total.
+
+    Growing covers wall beyond the block; shrinking refills the freed rows (plus the faded
+    margin) from the wall beyond the block. Either way that wall has to be plain. The split stays
+    as even as the wall allows."""
+    c0, r0, c1, r1 = box
+    amount = abs(change)
+    m = FRAME_SHADOW_MARGIN if change < 0 else 0
+    if not check_wall:
+        if change > 0 and (r0 - amount // 2 < 0 or r1 + amount - amount // 2 >= lum.shape[0]):
+            return None
+        return amount // 2, amount - amount // 2
+    # Objects in the outer blend margin stay mostly visible, so only the frame's own width
+    # plus a little shadow has to be plain wall.
+    inset = max(0, FRAME_SHADOW_MARGIN - 8)
+    cols = slice(c0 + inset, c1 + 1 - inset)
+    up = max(0, _plain_reach(lum, cols, r0, -1, amount + m) - m)
+    down = max(0, _plain_reach(lum, cols, r1 + 1, 1, amount + m) - m)
+    above = int(np.clip(amount // 2, amount - down, up))
+    below = min(down, amount - above)
+    return above, below
+
+
+def _wall_fill(mirrored: np.ndarray, original: np.ndarray) -> np.ndarray:
+    """Wall rows mirrored from beyond a shrunk frame, shaded to match the wall on either side
+    of them (the outer columns of `original`, the frame's shadow margin) and faded into it."""
+    fill = mirrored.astype(np.float32)
+    orig = original.astype(np.float32)
+    n, k = fill.shape[:2]
+    edge = 8
+    if k <= 4 * edge or n < 2:
+        return mirrored
+    sigma = 4.0
+    d_left = cv2.GaussianBlur((orig[:, :edge] - fill[:, :edge]).mean(axis=1, keepdims=True), (1, 0), sigma)
+    d_right = cv2.GaussianBlur((orig[:, -edge:] - fill[:, -edge:]).mean(axis=1, keepdims=True), (1, 0), sigma)
+    t = np.linspace(0.0, 1.0, k, dtype=np.float32)[None, :]
+    if fill.ndim == 3:
+        t = t[..., None]
+    fill += d_left * (1.0 - t) + d_right * t
+    ramp = np.linspace(0.0, 1.0, FRAME_SHADOW_MARGIN + 2, dtype=np.float32)[1:-1]
+    wc = np.ones(k, np.float32)
+    wc[: ramp.size] = ramp
+    wc[k - ramp.size :] = ramp[::-1]
+    wc = wc[None, :, None] if fill.ndim == 3 else wc[None, :]
+    return np.clip(fill * wc + orig * (1.0 - wc), 0, 255).astype(mirrored.dtype)
+
+
+def _resize_frame_rows(img, box, window_rows, above, below, shrink, fill_from_wall):
+    """Change a frame block's height by moving its top edge `above` rows and its bottom edge
+    `below` rows (outwards when growing, inwards when shrinking).
+
+    box is (left, top, right, bottom) of the block, window_rows the window's (top, bottom).
+    Returns (image, (new window top, new window bottom))."""
+    c0, r0, c1, r1 = box
+    w0, w1 = window_rows
+    amount = above + below
+    change = -amount if shrink else amount
+    wall_cols = slice(c0, c1 + 1)
+    # A shrinking block's faded margin lands on rows that held the old frame, so the wall fill
+    # reaches that far too.
+    m = FRAME_SHADOW_MARGIN
+    out = img.copy()
+    block = img[r0 : r1 + 1, wall_cols]
+    centre = (w0 + w1) // 2 - r0
+    if shrink:
+        cut = centre - amount // 2
+        block = np.concatenate([block[:cut], block[cut + amount :]], axis=0)
+        fill_above = above + m if above else 0
+        fill_below = below + m if below else 0
+        if not fill_from_wall:
+            out[r0 : r0 + fill_above, wall_cols] = 0
+            out[r1 + 1 - fill_below : r1 + 1, wall_cols] = 0
+        else:
+            if fill_above:
+                out[r0 : r0 + fill_above, wall_cols] = _wall_fill(
+                    img[r0 - fill_above : r0, wall_cols][::-1], img[r0 : r0 + fill_above, wall_cols]
+                )
+            if fill_below:
+                out[r1 + 1 - fill_below : r1 + 1, wall_cols] = _wall_fill(
+                    img[r1 + 1 : r1 + 1 + fill_below, wall_cols][::-1], img[r1 + 1 - fill_below : r1 + 1, wall_cols]
+                )
+        top = r0 + above
+    else:
+        span = max(1, min(amount, (w1 - w0) // 2))
+        band = block[centre - span // 2 : centre - span // 2 + span]
+        filler = np.concatenate([band] * (amount // span + 1), axis=0)[:amount]
+        block = np.concatenate([block[:centre], filler, block[centre:]], axis=0)
+        top = r0 - above
+    # The block's wall margin fades into the wall at its new place, so lighting differences
+    # along the wall leave no visible edge.
+    n, k = block.shape[:2]
+    ramp = np.linspace(0.0, 1.0, FRAME_SHADOW_MARGIN + 2, dtype=np.float32)[1:-1]
+    wr = np.ones(n, np.float32)
+    wr[: ramp.size] = ramp
+    wr[n - ramp.size :] = ramp[::-1]
+    wc = np.ones(k, np.float32)
+    wc[: ramp.size] = ramp
+    wc[k - ramp.size :] = ramp[::-1]
+    weight = np.minimum(wr[:, None], wc[None, :])
+    if block.ndim == 3:
+        weight = weight[..., None]
+    dest = out[top : top + n, wall_cols].astype(np.float32)
+    out[top : top + n, wall_cols] = (block.astype(np.float32) * weight + dest * (1.0 - weight)).astype(img.dtype)
+    new_top = w0 - r0 + top
+    new_bottom = new_top + (w1 - w0 + 1) + change - 1
+    return out, (new_top, new_bottom)
+
+
+def rework_room(frame_bgr: np.ndarray, quad: np.ndarray, meta: dict):
+    """Mat, edge, moulding and size changes a room's meta asks for. None of them depend on the
+    painting, so scripts/frames/bake_rooms.py writes them into the room image once and marks the
+    room meta.baked. Returns (frame_bgr, quad, changed)."""
+    changed = False
+    # The temple's surround is not a moulding, and canvases have none.
+    moulding_max = None if (meta.get("godOnly") or meta.get("canvas")) else (MOULDING_MAX or meta.get("mouldingMax"))
+    if meta.get("mat") in ("thin", "cover"):
+        keep = MAT_THIN_SHARE if meta.get("mat") == "thin" else 0.0
+        frame_bgr, quad = narrow_mat(frame_bgr, quad, keep, moulding_max)
+        changed = True
+    # Window edges are settled before the frame is reshaped to the painting, so the final
+    # window has the painting's shape.
+    if meta.get("canvas") or meta.get("edgeToEdge"):
+        frame_bgr, quad = expand_to_edge(frame_bgr, quad)
+        win = _axis_aligned_window(quad)
+        if moulding_max and meta.get("edgeToEdge") and win is not None:
+            short = min(win[2] - win[0] + 1, win[3] - win[1] + 1)
+            frame_bgr, box = thin_moulding(frame_bgr, win, moulding_max, short)
+            quad = _quad_for_box(box)
+        changed = True
+    if meta.get("grow"):
+        grown = enlarge_frame(frame_bgr, quad)
+        if grown is not None:
+            frame_bgr, quad = grown
+            changed = True
+    return frame_bgr, quad, changed
+
+
 def composite_painting_into_frame(
     painting_path: str,
     frame_path: str,
@@ -993,14 +1591,16 @@ def composite_painting_into_frame(
     painting_crop: Optional[np.ndarray] = None,
     blend_mode: str = DEFAULT_BLEND_MODE,
     blend_strength: float = DEFAULT_BLEND_STRENGTH,
+    is_base: bool = False,
 ) -> dict:
-    # painting_crop may be supplied pre-cropped (read + detected once per product);
-    # otherwise read and crop here for standalone use.
+    mat_ratio = 0.0 if is_base else ROOM_MAT_RATIO
+    max_crop = PAINTING_MAX_CROP if is_base else ROOM_MAX_CROP
+    # painting_crop may be supplied already read (once per product); otherwise read it here.
+    # The painting file is used whole: its own margins are part of the artwork.
     if painting_crop is None:
-        painting_bgr = cv2.imread(painting_path, cv2.IMREAD_COLOR)
-        if painting_bgr is None:
+        painting_crop = cv2.imread(painting_path, cv2.IMREAD_COLOR)
+        if painting_crop is None:
             raise ValueError(f"Could not read painting: {painting_path}")
-        painting_crop = detect_painting_content(painting_bgr)
 
     frame_bgr, frame_alpha = _read_frame_with_alpha(frame_path)
     if frame_bgr is None:
@@ -1008,15 +1608,28 @@ def composite_painting_into_frame(
 
     frame_resized = _ensure_canvas(frame_bgr, canvas_size)
     frame_alpha = _resize_alpha(frame_alpha, canvas_size)
-    alpha_quad = _quad_from_alpha(frame_alpha, canvas_size) if frame_alpha is not None else None
     stored_quad = stored_quad_for(orientation, frame_template, canvas_size, frame_set=frame_set)
+    meta = room_meta(orientation, frame_template, frame_set)
+    reworked = False
+    if stored_quad is not None and frame_alpha is None and not is_base and not meta.get("baked"):
+        frame_resized, stored_quad, reworked = rework_room(frame_resized, stored_quad, meta)
+    adapted = None
+    if FRAME_ADAPT and stored_quad is not None:
+        ph, pw = painting_crop.shape[:2]
+        adapted = adapt_frame_to_painting(frame_resized, frame_alpha, stored_quad, pw / max(ph, 1))
+    if adapted is not None:
+        frame_resized, frame_alpha, stored_quad = adapted
+    if adapted is not None or reworked:
+        alpha_quad = None
+    else:
+        alpha_quad = _quad_from_alpha(frame_alpha, canvas_size) if frame_alpha is not None else None
     if alpha_quad is not None:
         hole = (frame_alpha < 16).astype(np.uint8) * 255
-        warped, geom_mask = fit_painting_to_quad(painting_crop, alpha_quad)
+        warped, geom_mask = fit_painting_to_quad(painting_crop, alpha_quad, mat_ratio, max_crop)
         region_mask = cv2.bitwise_and(hole, cv2.bitwise_and(geom_mask, _mask_from_quad(alpha_quad, canvas_size)))
     elif stored_quad is not None:
         quad = stored_quad
-        warped, geom_mask = fit_painting_to_quad(painting_crop, quad)
+        warped, geom_mask = fit_painting_to_quad(painting_crop, quad, mat_ratio, max_crop)
         region_mask = _mask_from_quad(quad, canvas_size)
     else:
         green_mask = _morph_placeholder_mask(
@@ -1039,7 +1652,7 @@ def composite_painting_into_frame(
             placeholder_mask=placeholder_mask,
             use_green_mat=use_green_mat,
         )
-        warped, geom_mask = fit_painting_to_quad(painting_crop, quad)
+        warped, geom_mask = fit_painting_to_quad(painting_crop, quad, mat_ratio)
         quad_mask = _mask_from_quad(quad, canvas_size)
         flat_template = _is_flat_template_mat(solid_mask, canvas_size)
         overlap = cv2.bitwise_and(solid_mask, quad_mask)
@@ -1099,15 +1712,14 @@ def generate_for_product(
     else:
         return {"images": [], "totalBytes": 0, "errors": [{"message": "No frames provided."}]}
 
-    # Read + crop the painting once and reuse across all frames for this product.
-    painting_bgr = cv2.imread(painting_path, cv2.IMREAD_COLOR)
-    if painting_bgr is None:
+    # Read the painting once and reuse it across all frames for this product.
+    painting_crop = cv2.imread(painting_path, cv2.IMREAD_COLOR)
+    if painting_crop is None:
         return {
             "images": [],
             "totalBytes": 0,
             "errors": [{"message": f"Could not read painting: {painting_path}"}],
         }
-    painting_crop = detect_painting_content(painting_bgr)
 
     for entry in frame_entries:
         frame_path = entry.get("framePath") or entry.get("frame_path")
@@ -1142,6 +1754,7 @@ def generate_for_product(
                 painting_crop=painting_crop,
                 blend_mode=blend_mode,
                 blend_strength=blend_strength,
+                is_base=is_base,
             )
             total_bytes += result["bytes"]
             image_record = {

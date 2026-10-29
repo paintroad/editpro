@@ -17,6 +17,10 @@ const { shopifyGraphql } = require("../../lib/shopify-client");
 const { assertClean } = require("../../lib/brand-guard");
 
 const OUT_DIR = process.argv[2] || path.join(os.homedir(), "Downloads");
+// The redesign agent reads the handover from the user's personal agent store.
+const HANDOVER_DIR =
+  process.env.EDITPRO_HANDOVER_DIR ||
+  path.join(os.homedir(), "AppData", "Local", "Cursor", "AgentStores", "cursor_agent_stores", "u368051301", "files", "handover");
 const MIN_NEW = 12;
 const MENU = { "Art form": "Indian Art > Art Forms", Subject: "Indian Art > Gods & Stories", Motif: "Indian Art > Motifs", Use: "Indian Art > Vastu", Contemporary: "Styles" };
 
@@ -210,6 +214,11 @@ async function liveCollections() {
   fs.writeFileSync(briefPath, brief);
   console.log(xlsxPath);
   console.log(briefPath);
+  if (fs.existsSync(HANDOVER_DIR)) {
+    fs.copyFileSync(xlsxPath, path.join(HANDOVER_DIR, "paintroad-new-collections.xlsx"));
+    fs.copyFileSync(briefPath, path.join(HANDOVER_DIR, "paintroad-new-collections.md"));
+    console.log(`Handover updated in ${HANDOVER_DIR}`);
+  }
   console.log(`Create ${create.length}, grow ${grow.length}, hold ${hold.length}`);
 })().catch((error) => {
   console.error(error.message);

@@ -16,7 +16,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 Image.MAX_IMAGE_PIXELS = None
 GREY = (128, 128, 128)
-REF_MAX = 1536
+REF_MAX = 1080
 FEATHER = 0.012
 MAX_DRIFT = 20
 EXTS = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp")

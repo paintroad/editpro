@@ -1,12 +1,6 @@
 /**
- * Set product mm-google-shopping custom_label_0..4 and variant custom_label_0.
- *
- * Product label 0: devotional, else artist name, else keep trendy, else empty.
- * Label 1: first style in the reviewed order.
- * Label 2: first art form (Line art, Watercolour, Geometric, Floral).
- * Label 3: shopify.color-pattern; two or more names become multicolor.
- * Label 4: first subject in the reviewed order.
- * Variant label 0: sale-price band under_1000 / 1000_3000 / 3000_6000 / 6000_plus.
+ * Set mm-google-shopping custom labels on every active product and variant.
+ * The rules live in lib/google-custom-labels.js (also used by the Pipeline).
  *
  * Run:
  *   node scripts/set-product-custom-labels.js
@@ -17,53 +11,18 @@ const os = require("os");
 const path = require("path");
 const { shopifyGraphql } = require("../lib/shopify-client");
 const { getShopifyCredentials } = require("../lib/config-store");
+const {
+  NAMESPACE,
+  METAFIELD_TYPE,
+  VARIANT_LABEL_KEYS,
+  loadLabelCollections,
+  matchesCollection,
+  productLabels,
+  priceBand,
+} = require("../lib/google-custom-labels");
 
-const NAMESPACE = "mm-google-shopping";
-const METAFIELD_TYPE = "single_line_text_field";
-const COLLECTIONS_PATH = path.join(os.homedir(), ".editpro", "shopify-live-collections.json");
 const REPORT_PATH = path.join(os.homedir(), ".editpro", "custom-labels-apply-report.json");
 const BATCH_SIZE = 25;
-
-const STYLE_HANDLES = [
-  "modern",
-  "abstract",
-  "boho",
-  "monochrome",
-  "maximalist",
-  "pop-art",
-  "bauhaus",
-  "picasso-inspired",
-  "natural-vintage",
-  "maximalist-art",
-  "mattise-style",
-  "banksy",
-  "intricate-patterns",
-];
-
-const SUBJECT_HANDLES = [
-  "travel",
-  "botanical-prints",
-  "beach-vacation",
-  "animal",
-  "women-illustrations",
-  "love-romance",
-  "cowgirl",
-  "autumn",
-  "kitchen-prints",
-  "motivational-quotes",
-  "cocktails",
-  "greek",
-  "dog-lovers",
-  "sun-signs",
-  "cat-lovers",
-];
-
-const ART_FORMS = [
-  { label: "Line art", tags: ["line art"] },
-  { label: "Watercolour", tags: ["watercolour", "watercolor"] },
-  { label: "Geometric", tags: ["geometric"] },
-  { label: "Floral", tags: ["floral"] },
-];
 
 const BULK_QUERY = `{
   products {
@@ -74,7 +33,6 @@ const BULK_QUERY = `{
         status
         tags
         artist: metafield(namespace: "custom", key: "artist") { value }
-        colorPattern: metafield(namespace: "shopify", key: "color-pattern") { value }
         label0: metafield(namespace: "mm-google-shopping", key: "custom_label_0") { value }
         label1: metafield(namespace: "mm-google-shopping", key: "custom_label_1") { value }
         label2: metafield(namespace: "mm-google-shopping", key: "custom_label_2") { value }
@@ -86,7 +44,12 @@ const BULK_QUERY = `{
               id
               sku
               price
+              selectedOptions { name value }
               label0: metafield(namespace: "mm-google-shopping", key: "custom_label_0") { value }
+              label1: metafield(namespace: "mm-google-shopping", key: "custom_label_1") { value }
+              label2: metafield(namespace: "mm-google-shopping", key: "custom_label_2") { value }
+              label3: metafield(namespace: "mm-google-shopping", key: "custom_label_3") { value }
+              label4: metafield(namespace: "mm-google-shopping", key: "custom_label_4") { value }
             }
           }
         }
@@ -130,57 +93,6 @@ async function gql(storeDomain, accessToken, query, variables) {
     }
   }
   return null;
-}
-
-function loadCollection(handle) {
-  const data = JSON.parse(fs.readFileSync(COLLECTIONS_PATH, "utf8"));
-  const collection = (data.collections || []).find((row) => row.handle === handle);
-  if (!collection?.ruleSet?.rules?.length) {
-    throw new Error(`Collection rules missing for ${handle}`);
-  }
-  return collection;
-}
-
-function tagSet(tags) {
-  return new Set((tags || []).map((tag) => String(tag).trim().toLowerCase()));
-}
-
-function matchesCollection(tags, artistGid, collection) {
-  const have = tagSet(tags);
-  const checks = collection.ruleSet.rules.map((rule) => {
-    if (rule.column === "TAG") {
-      return have.has(String(rule.condition || "").trim().toLowerCase());
-    }
-    if (rule.column === "PRODUCT_METAFIELD_DEFINITION") {
-      return Boolean(artistGid) && artistGid === rule.condition;
-    }
-    return false;
-  });
-  return collection.ruleSet.appliedDisjunctively ? checks.some(Boolean) : checks.every(Boolean);
-}
-
-function firstCollectionTitle(tags, artistGid, collections) {
-  for (const collection of collections) {
-    if (matchesCollection(tags, artistGid, collection)) return collection.title;
-  }
-  return "";
-}
-
-function artForm(tags) {
-  const have = tagSet(tags);
-  for (const form of ART_FORMS) {
-    if (form.tags.some((tag) => have.has(tag))) return form.label;
-  }
-  return "";
-}
-
-function priceBand(price) {
-  const value = Number(price);
-  if (Number.isNaN(value)) return "";
-  if (value < 1000) return "under_1000";
-  if (value < 3000) return "1000_3000";
-  if (value < 6000) return "3000_6000";
-  return "6000_plus";
 }
 
 function parseGids(value) {
@@ -302,15 +214,12 @@ async function writeBatches(storeDomain, accessToken, mutation, field, rows, lab
 
 async function main() {
   const apply = isApply();
-  const styles = STYLE_HANDLES.map(loadCollection);
-  const subjects = SUBJECT_HANDLES.map(loadCollection);
-  const devotional = loadCollection("devotional");
+  const collections = loadLabelCollections();
   const { storeDomain, accessToken } = getShopifyCredentials();
 
-  console.log("Loading artist and colour names…");
+  console.log("Loading artist names…");
   const artistNames = await loadIdNames(storeDomain, accessToken, "artists", "name");
-  const colorNames = await loadIdNames(storeDomain, accessToken, "shopify--color-pattern", "label");
-  console.log(`Artists ${artistNames.size} | Colours ${colorNames.size}`);
+  console.log(`Artists ${artistNames.size}`);
 
   console.log("Downloading active catalog…");
   const file = await downloadProducts(storeDomain, accessToken);
@@ -330,7 +239,6 @@ async function main() {
   const styleMembership = {};
   const styleAssigned = {};
   const artAssigned = {};
-  const colorAssigned = {};
   const subjectMembership = {};
   const subjectAssigned = {};
   const bandCounts = {};
@@ -338,7 +246,6 @@ async function main() {
   const deletes = [];
   let activeProducts = 0;
   let activeVariants = 0;
-  let unresolvedColors = 0;
 
   for (const product of products.values()) {
     if (product.status !== "ACTIVE") continue;
@@ -346,41 +253,21 @@ async function main() {
     const artistGid = parseGids(product.artist?.value)[0] || "";
     const artistName = artistGid ? artistNames.get(artistGid) || "" : "";
     const tags = product.tags || [];
-    const devotionalHit = matchesCollection(tags, artistGid, devotional);
-    let label0 = "";
-    if (devotionalHit) label0 = "devotional";
-    else if (artistName) label0 = artistName;
-    else if (String(product.label0?.value || "") === "trendy") label0 = "trendy";
-    bump(label0Counts, label0 || "(empty)");
-
-    for (const collection of styles) {
+    const desired = productLabels(
+      { tags, artistGid, artistName, currentLabel0: String(product.label0?.value || "") },
+      collections
+    );
+    bump(label0Counts, desired[0] || "(empty)");
+    bump(styleAssigned, desired[1] || "(empty)");
+    bump(artAssigned, desired[2] || "(empty)");
+    bump(subjectAssigned, desired[3] || "(empty)");
+    for (const collection of collections.styles) {
       if (matchesCollection(tags, artistGid, collection)) bump(styleMembership, collection.title);
     }
-    const label1 = firstCollectionTitle(tags, artistGid, styles);
-    bump(styleAssigned, label1 || "(empty)");
-
-    const label2 = artForm(tags);
-    bump(artAssigned, label2 || "(empty)");
-
-    const colorIds = parseGids(product.colorPattern?.value);
-    const colorLabels = [];
-    for (const id of colorIds) {
-      const name = colorNames.get(id);
-      if (!name) unresolvedColors += 1;
-      else if (!colorLabels.includes(name)) colorLabels.push(name);
-    }
-    let label3 = "";
-    if (colorLabels.length === 1) label3 = colorLabels[0];
-    else if (colorLabels.length > 1) label3 = "multicolor";
-    bump(colorAssigned, label3 || "(empty)");
-
-    for (const collection of subjects) {
+    for (const collection of collections.subjects) {
       if (matchesCollection(tags, artistGid, collection)) bump(subjectMembership, collection.title);
     }
-    const label4 = firstCollectionTitle(tags, artistGid, subjects);
-    bump(subjectAssigned, label4 || "(empty)");
 
-    const desired = [label0, label1, label2, label3, label4];
     const current = [0, 1, 2, 3, 4].map((index) => String(product[`label${index}`]?.value || ""));
     desired.forEach((value, index) => {
       const key = `custom_label_${index}`;
@@ -400,13 +287,18 @@ async function main() {
 
     for (const variant of product.variants) {
       activeVariants += 1;
-      const band = priceBand(variant.price);
+      const band = priceBand(variant);
       bump(bandCounts, band || "(empty)");
-      if (!band || band === String(variant.label0?.value || "")) continue;
+      VARIANT_LABEL_KEYS.forEach((key, index) => {
+        if (String(variant[`label${index}`]?.value || "")) {
+          deletes.push({ ownerId: variant.id, namespace: NAMESPACE, key });
+        }
+      });
+      if (!band || band === String(variant.label4?.value || "")) continue;
       sets.push({
         ownerId: variant.id,
         namespace: NAMESPACE,
-        key: "custom_label_0",
+        key: "custom_label_4",
         type: METAFIELD_TYPE,
         value: band,
       });
@@ -420,11 +312,9 @@ async function main() {
     styleMembership,
     styleAssigned,
     artAssigned,
-    colorAssigned,
     subjectMembership,
     subjectAssigned,
     bandCounts,
-    unresolvedColors,
     sets: sets.length,
     deletes: deletes.length,
   };
@@ -435,6 +325,11 @@ async function main() {
     return;
   }
 
+  const backupDir = path.join(os.homedir(), ".editpro", "backups");
+  fs.mkdirSync(backupDir, { recursive: true });
+  const backup = path.join(backupDir, `custom-labels-before-${Date.now()}.jsonl`);
+  fs.copyFileSync(file, backup);
+  console.log(`Previous labels saved to ${backup}`);
   console.log(`Writing ${sets.length} metafields, deleting ${deletes.length}…`);
   const setResult = await writeBatches(storeDomain, accessToken, METAFIELDS_SET, "metafieldsSet", sets, "set");
   const deleteResult = await writeBatches(

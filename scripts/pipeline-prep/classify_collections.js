@@ -5,7 +5,7 @@
  *   node scripts/pipeline-prep/classify_collections.js [--redo] [--limit N] [NAME...]
  */
 const fs = require("fs");
-const sharp = require("sharp");
+const { openAiImageBuffer } = require("../../lib/openai-image");
 const { DatabaseSync } = require("node:sqlite");
 const { getOpenAiApiKey } = require("../../lib/config-store");
 const { COLLECTION_TAGS } = require("../../lib/catalog-collections");
@@ -31,11 +31,7 @@ function prompt(context) {
 }
 
 async function classify(row, apiKey) {
-  const image = await sharp(row.file, { limitInputPixels: false })
-    .rotate()
-    .resize({ width: 512, height: 512, fit: "inside" })
-    .jpeg({ quality: 85 })
-    .toBuffer();
+  const image = await openAiImageBuffer(row.file, { maxWidth: 512 });
   const ref = await reference.referenceForRow(row);
   const context = [
     ref.categories.length ? `filed under ${ref.categories.join(" > ")}` : "",
