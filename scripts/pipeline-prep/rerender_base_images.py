@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 from lifestyle_compositor import composite_painting_into_frame  # noqa: E402
 
 STORE = os.path.join(os.path.expanduser("~"), ".editpro", "catalog-products.json")
-SETS = r"C:\Users\divya\Downloads\_Frame References\_New Lifestyle Sets"
+SETS = r"C:\Users\divya\Downloads\_Frames\_New Lifestyle Sets"
 
 
 def render(job):

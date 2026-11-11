@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Set assignment review</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, sans-serif; background: #1d1d1f; color: #eee; display: flex; height: 100vh; }
+  #side { width: 300px; padding: 12px; border-right: 1px solid #333; overflow: auto; flex: none; }
+  #main { flex: 1; display: flex; flex-direction: column; padding: 12px 16px; min-width: 0; overflow: auto; }
+  h1 { font-size: 22px; margin: 0; }
+  .muted { color: #999; }
+  select, button { font: inherit; }
+  select { padding: 3px; background: #2c2c2e; color: #eee; border: 1px solid #555; border-radius: 4px; }
+  #shape { width: 100%; margin: 4px 0 10px; }
+  button { padding: 6px 12px; border-radius: 6px; border: 1px solid #555; background: #2c2c2e; color: #eee; cursor: pointer; }
+  button.ok { background: #1f7a3a; }
+  .setrow { display: flex; gap: 6px; padding: 3px 6px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  .setrow:hover { background: #2c2c2e; }
+  .setrow.cur { background: #0a84ff33; outline: 1px solid #0a84ff; }
+  .setrow .n { margin-left: auto; color: #aaa; white-space: nowrap; }
+  .setrow.done .n { color: #30d158; }
+  .grouphead { margin: 10px 0 2px; font-size: 11px; letter-spacing: .08em; color: #888; text-transform: uppercase; }
+  #rooms { display: flex; gap: 6px; overflow-x: auto; margin: 8px 0; flex: none; align-items: flex-end; }
+  #rooms img { height: 80px; border-radius: 4px; cursor: zoom-in; opacity: .6; }
+  #rooms img.used { opacity: 1; outline: 2px solid #0a84ff; height: 96px; }
+  #bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0 10px; }
+  #grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .tile { background: #2a2a2c; border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 5px; border: 2px solid transparent; }
+  .tile.approved { border-color: #1f7a3a; }
+  .tile.moved { border-color: #ff9f0a; }
+  .tile .img { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; background: #3a3a3c; border-radius: 4px; cursor: zoom-in; color: #aaa; }
+  .tile .img img { width: 100%; height: 100%; object-fit: contain; }
+  .tile .t { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile .why { font-size: 12px; color: #aaa; height: 2.8em; overflow: hidden; }
+  .tile select { width: 100%; font-size: 13px; }
+  .tile .row { display: flex; gap: 6px; align-items: center; }
+  .tile .row button { padding: 3px 10px; font-size: 13px; }
+  .tile .row a { font-size: 12px; color: #8ab4f8; cursor: pointer; }
+  .badge { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: #333; }
+  .badge.approved { background: #1f7a3a; } .badge.moved { background: #a35c00; }
+  .tile textarea { width: 100%; height: 52px; background: #111; color: #eee; border: 1px solid #444; border-radius: 6px; padding: 6px; font: 13px/1.35 system-ui, sans-serif; resize: vertical; }
+  .tile textarea.saved { border-color: #ffd60a; }
+  .tile .done { font-size: 11px; color: #999; }
+  .tile .nstate { font-size: 11px; color: #30d158; }
+  .setrow .dot { color: #ffd60a; }
+  #zoom { position: fixed; inset: 0; background: #000d; display: none; align-items: center; justify-content: center; cursor: zoom-out; z-index: 9; }
+  #zoom img { max-width: 94vw; max-height: 94vh; }
+  #msg { font-weight: 600; }
+  kbd { background: #333; border-radius: 4px; padding: 0 5px; font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="side">
+  <div class="muted">Shape</div>
+  <select id="shape">
+    <option value="all">All shapes</option>
+    <option value="portrait">Portrait 3:4</option>
+    <option value="landscape">Landscape 4:3</option>
+    <option value="square">Square 1:1</option>
+    <option value="wide">Wide 16:9 (Statement)</option>
+    <option value="tall">Tall 9:16 (Statement)</option>
+  </select>
+  <div id="totals" class="muted"></div>
+  <div id="sets"></div>
+</div>
+<div id="main">
+  <div style="display:flex;align-items:baseline;gap:16px;flex-wrap:wrap">
+    <h1 id="title">&hellip;</h1>
+    <span id="sub" class="muted"></span>
+    <span id="msg"></span>
+  </div>
+  <div id="rooms"></div>
+  <div id="bar">
+    <button class="ok" id="approveAll">Approve all shown (A)</button>
+    <select id="show">
+      <option value="all">All paintings in this set</option>
+      <option value="todo">Not approved yet</option>
+      <option value="moved">Moved here by you</option>
+    </select>
+    <span class="muted">Each painting is shown in the highlighted room of the set. Change a painting's set with its dropdown (that also approves it and renders it in the new set). Click a sample to enlarge. <kbd>N</kbd>/<kbd>P</kbd> next / previous set.</span>
+  </div>
+  <div id="grid"></div>
+</div>
+<div id="zoom"><img alt=""></div>
+<script>
+let sets = [], paintings = {}, feedback = {}, cur = null;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const setOf = (stem) => feedback[stem]?.set || paintings[stem].set;
+const isApproved = (stem) => feedback[stem]?.status === "approved";
+const shapeLabel = { portrait: "Portrait", landscape: "Landscape", square: "Square", wide: "Wide 16:9", tall: "Tall 9:16" };
+
+async function load() {
+  const r = await fetch("api/items").then((x) => x.json());
+  if (r.error) { $("title").textContent = r.error; return; }
+  ({ sets, paintings, feedback } = r);
+  const first = visibleSets().find((s) => members(s.name).some((st) => !isApproved(st))) || visibleSets()[0];
+  open(first?.name);
+}
+
+function visibleSets() {
+  const shape = $("shape").value;
+  return sets.filter((s) => shape === "all" || s.shape === shape);
+}
+function members(name) { return Object.keys(paintings).filter((st) => setOf(st) === name); }
+
+function renderSide() {
+  const vis = visibleSets();
+  const stems = Object.keys(paintings).filter((st) => vis.some((s) => s.name === setOf(st)));
+  const done = stems.filter(isApproved).length;
+  $("totals").innerHTML = `<p>${done} of ${stems.length} paintings approved</p>`;
+  let html = "", lastHead = "";
+  for (const s of vis) {
+    const head = `${shapeLabel[s.shape]} · ${s.group}`;
+    if (head !== lastHead) { html += `<div class="grouphead">${esc(head)}</div>`; lastHead = head; }
+    const m = members(s.name), ok = m.filter(isApproved).length;
+    const label = s.name.replace(/^\S+\s+/, "");
+    html += `<div class="setrow ${s.name === cur ? "cur" : ""} ${m.length && ok === m.length ? "done" : ""}" data-set="${esc(s.name)}">
+      <span>${esc(label)}${m.some((st) => feedback[st]?.note) ? ` <span class="dot" title="has feedback">&#9679;</span>` : ""}</span><span class="n">${ok}/${m.length}</span></div>`;
+  }
+  $("sets").innerHTML = html;
+  for (const el of document.querySelectorAll(".setrow")) el.onclick = () => open(el.dataset.set);
+}
+
+function open(name) {
+  if (!name) return;
+  cur = name;
+  const s = sets.find((x) => x.name === name);
+  $("title").textContent = name;
+  $("rooms").innerHTML = s.rooms.map((f) => `<img loading="lazy" class="${f === s.previewRoom ? "used" : ""}" title="${esc(f)}${f === s.previewRoom ? " (samples below use this room)" : ""}" src="room?set=${encodeURIComponent(name)}&file=${encodeURIComponent(f)}">`).join("");
+  for (const img of $("rooms").querySelectorAll("img")) img.onclick = () => zoom(img.src);
+  renderGrid();
+  renderSide();
+  $("main").scrollTop = 0;
+}
+
+// A painting's note is saved with its decision; saving does not re-render, so typing elsewhere is not lost.
+async function saveNote(st, box) {
+  const note = box.value.trim();
+  if (note === (feedback[st]?.note || "")) return;
+  const r = await fetch("api/feedback", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ stems: [st], entry: { note } }) }).then((x) => x.json());
+  const state = box.parentElement.querySelector(".nstate");
+  if (r.error) { state.textContent = r.error; state.style.color = "#ff453a"; return; }
+  feedback[st] = r.entries[st];
+  box.classList.toggle("saved", Boolean(note));
+  state.style.color = "";
+  state.textContent = note ? "Feedback saved" : "Feedback cleared";
+  renderSide();
+}
+
+function optionsFor(stem) {
+  const p = paintings[stem];
+  const ranked = p.options || [];
+  const rest = sets.filter((s) => s.shape === p.shape && !ranked.includes(s.name)).map((s) => s.name);
+  const opt = (n, label) => `<option value="${esc(n)}" ${n === setOf(stem) ? "selected" : ""}>${esc(label)}</option>`;
+  return `<optgroup label="Suggested">${ranked.map((n) => opt(n, n)).join("")}</optgroup>` +
+    (rest.length ? `<optgroup label="Other ${esc(shapeLabel[p.shape])} sets">${rest.map((n) => opt(n, n)).join("")}</optgroup>` : "");
+}
+
+function renderGrid() {
+  const show = $("show").value;
+  const list = members(cur).filter((st) => show === "all" || (show === "todo" ? !isApproved(st) : Boolean(feedback[st]?.set)));
+  const s = sets.find((x) => x.name === cur);
+  const all = members(cur);
+  $("sub").textContent = `${all.length} paintings · ${all.filter(isApproved).length} approved · samples in ${(s.previewRoom || "").replace(/^\d+\.\s*|\.\w+$/g, "")}`;
+  $("grid").innerHTML = list.map((st) => {
+    const p = paintings[st], fb = feedback[st] || {};
+    const moved = Boolean(fb.set);
+    const cls = moved ? "moved" : isApproved(st) ? "approved" : "";
+    const badge = moved ? `<span class="badge moved">moved here</span>` : isApproved(st) ? `<span class="badge approved">approved</span>` : `<span class="badge">proposed</span>`;
+    const why = moved ? `You moved this from ${p.set}` : p.reason;
+    return `<div class="tile ${cls}" data-stem="${esc(st)}">
+      <div class="img"><img loading="lazy" src="${previewSrc(st)}" alt=""></div>
+      <div class="t" title="${esc(p.title)}">${esc(st)} · ${esc(p.title || "untitled")}</div>
+      <div class="why" title="${esc(why)}">${esc(why)}</div>
+      <select>${optionsFor(st)}</select>
+      <div class="row">${badge}<a data-act="file">painting file</a><span style="margin-left:auto"></span>
+        ${isApproved(st) ? `<button data-act="undo">Undo</button>` : `<button class="ok" data-act="ok">Approve</button>`}</div>
+      ${(fb.history || []).map((h) => `<div class="done">&#10003; ${esc(h.note)}${h.done ? ` &rarr; ${esc(h.done)}` : ""}</div>`).join("")}
+      <textarea class="${fb.note ? "saved" : ""}" placeholder="Feedback on this painting (saves when you click away, or Ctrl+Enter)">${esc(fb.note || "")}</textarea>
+      <span class="nstate"></span>
+    </div>`;
+  }).join("") || `<p class="muted">Nothing to show here.</p>`;
+  for (const tile of document.querySelectorAll(".tile")) {
+    const st = tile.dataset.stem;
+    const img = tile.querySelector(".img img");
+    img.onerror = () => waitForPreview(st, img);
+    tile.querySelector(".img").onclick = () => img.naturalWidth && zoom(img.src);
+    tile.querySelector("a[data-act=file]").onclick = () => zoom(`painting?stem=${encodeURIComponent(st)}`);
+    const box = tile.querySelector("textarea");
+    box.onblur = () => saveNote(st, box);
+    box.onkeydown = (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveNote(st, box); } };
+    tile.querySelector("select").onchange = (e) => save([st], { set: e.target.value, status: "approved" }, `${st} moved to ${e.target.value}`);
+    const b = tile.querySelector("button");
+    b.onclick = () => (b.dataset.act === "ok" ? save([st], { status: "approved" }) : save([st], null, `${st} back to proposed`));
+  }
+}
+
+// A sample is keyed by painting and set, so a moved painting loads the new room's sample.
+function previewSrc(st, render) {
+  const poll = render ? `${feedback[st]?.set ? "&render=1" : ""}&t=${Date.now()}` : "";
+  return `preview?stem=${encodeURIComponent(st)}&set=${encodeURIComponent(setOf(st))}${poll}`;
+}
+function waitForPreview(st, img) {
+  const box = img.parentElement;
+  if (!box.querySelector(".wait")) box.insertAdjacentHTML("beforeend", `<span class="wait">Rendering sample&hellip;</span>`);
+  img.style.display = "none";
+  setTimeout(() => {
+    if (!document.body.contains(img)) return;
+    img.onload = () => { img.style.display = ""; box.querySelector(".wait")?.remove(); };
+    img.src = previewSrc(st, true);
+  }, 4000);
+}
+
+async function save(stems, entry, note) {
+  const r = await fetch("api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stems, entry }) }).then((x) => x.json());
+  if (r.error) { $("msg").textContent = r.error; $("msg").style.color = "#ff453a"; return; }
+  for (const [st, e] of Object.entries(r.entries)) { if (e) feedback[st] = e; else delete feedback[st]; }
+  $("msg").style.color = "#30d158";
+  $("msg").textContent = note || `${stems.length} approved`;
+  renderGrid();
+  renderSide();
+}
+
+function zoom(src) { $("zoom").querySelector("img").src = src; $("zoom").style.display = "flex"; }
+$("zoom").onclick = () => { $("zoom").style.display = "none"; };
+
+$("approveAll").onclick = () => {
+  const show = $("show").value;
+  const stems = members(cur).filter((st) => !isApproved(st) && (show !== "moved" || feedback[st]?.set));
+  if (stems.length) save(stems, { status: "approved" }, `${stems.length} paintings approved in ${cur}`);
+};
+$("show").onchange = renderGrid;
+$("shape").onchange = () => { const v = visibleSets(); open(v.find((s) => s.name === cur) ? cur : v[0]?.name); };
+document.addEventListener("keydown", (e) => {
+  if (["SELECT", "TEXTAREA", "INPUT"].includes(e.target.tagName) || e.ctrlKey || e.metaKey) return;
+  const v = visibleSets(), i = v.findIndex((s) => s.name === cur);
+  if (e.key === "Escape") $("zoom").style.display = "none";
+  else if (e.key === "n" || e.key === "N") open(v[Math.min(v.length - 1, i + 1)]?.name);
+  else if (e.key === "p" || e.key === "P") open(v[Math.max(0, i - 1)]?.name);
+  else if (e.key === "a" || e.key === "A") $("approveAll").click();
+});
+load();
+</script>
+</body>
+</html>

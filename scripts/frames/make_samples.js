@@ -14,6 +14,10 @@ const { newSetsDir } = require("./paths");
 const DB = path.join(os.homedir(), ".editpro", "pipeline-prep", "catalog.db");
 const QUADS = path.join(__dirname, "..", "frame-quads.json");
 
+// Samples must show the exact shapes we sell; the frame reshapes to the painting.
+const EXACT = { portrait: 3 / 4, landscape: 4 / 3, square: 1 };
+const exactShape = (r, orientation) => Math.abs(Math.log((r.width / r.height) / EXACT[orientation])) <= Math.log(1.015);
+
 function shapeOf(w, h) {
   const a = w / h;
   if (Math.abs(a - 1) < 0.05) return "square";
@@ -27,13 +31,20 @@ function seeded(name) {
 }
 
 // godSplit: how many of the picks must be god paintings (the rest are not), or null for any.
-function pickPaintings(setName, setClass, orientation, count, godSplit = null) {
+async function pickPaintings(setName, setClass, orientation, count, godSplit = null) {
   const db = new DatabaseSync(DB);
-  const rows = db
+  const listed = db
     .prepare("select name, file, width, height, collection_tags from images where collection_tags is not null")
     .all()
     .map((r) => ({ ...r, tags: JSON.parse(r.collection_tags || "[]") }))
-    .filter((r) => r.file && fs.existsSync(r.file) && shapeOf(r.width, r.height) === orientation)
+    .filter((r) => r.file && fs.existsSync(r.file) && shapeOf(r.width, r.height) === orientation);
+  // The stored size can be stale, so the shape is checked on the file itself.
+  for (const r of listed) {
+    const m = await sharp(r.file, { limitInputPixels: false }).metadata().catch(() => null);
+    if (m) [r.width, r.height] = m.orientation >= 5 ? [m.height, m.width] : [m.width, m.height];
+  }
+  const rows = listed
+    .filter((r) => exactShape(r, orientation))
     .filter((r) => {
       const classes = setClassesForTags(r.tags);
       if (classes.includes(setClass)) return true;
@@ -82,14 +93,14 @@ function pickPaintings(setName, setClass, orientation, count, godSplit = null) {
   fs.mkdirSync(samplesDir, { recursive: true });
 
   const allFrames = listFramesForOrientation(root, meta.orientation, setName)
-    .frames.filter((f) => !f.isBase)
+    .frames.filter((f) => !f.isBase || /^1\. Base .* Black\.png$/i.test(f.frameTemplate))
     .map((f) => ({ ...f, orientation: meta.orientation }));
   const quadMeta = (JSON.parse(fs.readFileSync(QUADS, "utf8")).quads[setName]) || {};
   const metaFor = (f) => (quadMeta[f.frameTemplate] || {}).meta;
   const hasGodRooms = allFrames.some((f) => (metaFor(f) || {}).godOnly);
   const count = Number(countArg) || 3;
   // Sets with god-only rooms show both kinds: god paintings first, then one that is not.
-  const paintings = pickPaintings(setName, meta.setClass, meta.orientation, count, hasGodRooms ? count - 1 : null);
+  const paintings = await pickPaintings(setName, meta.setClass, meta.orientation, count, hasGodRooms ? count - 1 : null);
   const T = 360;
   const tiles = [];
   let columns = 0;
@@ -110,9 +121,9 @@ function pickPaintings(setName, setClass, orientation, count, godSplit = null) {
     for (const [col, img] of result.images.entries()) {
       const frame = frames.find((f) => f.outputIndex === img.index);
       const room = path.parse(frame.frameTemplate).name.replace(/^\d+\.\s*/, "");
-      const out = path.join(samplesDir, `Sample ${row + 1} - ${label} - ${img.index}. ${room}.jpg`);
+      const out = path.join(samplesDir, `Sample ${row + 1} - ${label} - ${img.index}. ${room}${path.extname(img.path)}`);
       fs.copyFileSync(img.path, out);
-      tiles.push({ input: await sharp(img.path).resize(T, T).jpeg().toBuffer(), left: col * T, top: row * T });
+      tiles.push({ input: await sharp(img.path).flatten({ background: "#ffffff" }).resize(T, T).jpeg().toBuffer(), left: col * T, top: row * T });
     }
     fs.rmSync(work, { recursive: true, force: true });
   }

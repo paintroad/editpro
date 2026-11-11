@@ -19,6 +19,8 @@
   const moduleSale = document.getElementById("module-sale");
   const moduleCutout = document.getElementById("module-cutout");
   const moduleArtwork = document.getElementById("module-artwork");
+  const moduleReview = document.getElementById("module-review");
+  const reviewFrame = document.getElementById("reviewFrame");
   const connectionModal = document.getElementById("connectionModal");
   const settingsModal = document.getElementById("settingsModal");
 
@@ -67,6 +69,13 @@
     }
     if (moduleArtwork) {
       moduleArtwork.hidden = moduleId !== "artwork";
+    }
+    if (moduleReview) {
+      moduleReview.hidden = moduleId !== "review";
+      // load the review page only when first opened
+      if (moduleId === "review" && reviewFrame && !reviewFrame.getAttribute("src")) {
+        reviewFrame.src = reviewFrame.dataset.src;
+      }
     }
     const isSeoModule = moduleId === "audit" || moduleId === "live";
     if (seoSharedChrome) {
@@ -159,6 +168,24 @@
 
   document.querySelectorAll("[data-rules-tab]").forEach((btn) => {
     btn.addEventListener("click", () => activateRulesTab(btn.dataset.rulesTab));
+  });
+
+  document.querySelectorAll("[data-review-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const src = `review/${btn.dataset.reviewTab}/`;
+      document.querySelectorAll("[data-review-tab]").forEach((b) => {
+        b.classList.toggle("btn-primary", b === btn);
+        b.classList.toggle("btn-secondary", b !== btn);
+      });
+      if (reviewFrame) {
+        reviewFrame.dataset.src = src;
+        reviewFrame.src = src;
+      }
+      const openTab = document.getElementById("reviewOpenTab");
+      if (openTab) {
+        openTab.href = src;
+      }
+    });
   });
 
   document.addEventListener("keydown", (e) => {

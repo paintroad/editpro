@@ -17,8 +17,8 @@ const enrich = require("../lib/catalog-enrich-runner");
 const lifestyle = require("../lib/lifestyle-runner");
 
 const INPUT = "C:\\Users\\divya\\Downloads\\_New Catalog\\Output";
-const OUTPUT = "C:\\Users\\divya\\Downloads\\_New Generated Catalog";
-const FRAMES = "C:\\Users\\divya\\Downloads\\_Frame References";
+const OUTPUT = "C:\\Users\\divya\\Downloads\\_Catalog\\LIVE\\Generated Lifestyle Images";
+const FRAMES = "C:\\Users\\divya\\Downloads\\_Frames";
 const START_ID = 13213;
 const IDS = ["13213", "13214", "13215"];
 

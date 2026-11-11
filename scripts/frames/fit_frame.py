@@ -6,7 +6,8 @@ is exactly 3:4, 4:3 or 1:1 (frames further off keep their shape; the compositor 
 frame to its painting), repaints the window as a flat placeholder and writes the result
 at 1080x1080. Prints JSON with the window quad (normalised, +1 px) for frame-quads.json.
 
-    python scripts/frames/fit_frame.py <portrait|landscape|square> <input> <output.jpg>
+    python scripts/frames/fit_frame.py <portrait|landscape|square|wide|tall> <input> <output.jpg>
+(wide = 16:9, tall = 9:16)
 """
 import json
 import sys
@@ -15,7 +16,7 @@ import cv2
 import numpy as np
 
 CANVAS = 1080
-TARGET = {"portrait": 3 / 4, "landscape": 4 / 3, "square": 1.0}
+TARGET = {"portrait": 3 / 4, "landscape": 4 / 3, "square": 1.0, "wide": 16 / 9, "tall": 9 / 16}
 PLACEHOLDER_BGR = (216, 219, 215)  # #D7DBD8
 MAX_CORRECTION = 0.15
 MAX_SAT = 34

@@ -1330,6 +1330,129 @@ def enlarge_frame(frame_bgr: np.ndarray, quad: np.ndarray, target: float = FRAME
     return img, new_quad
 
 
+def _wall_model(img: np.ndarray, box: Tuple[int, int, int, int], ring: int) -> Optional[np.ndarray]:
+    """Plain wall over box (inclusive), fitted as a smooth quadratic surface to a ring of wall
+    round it (pixels far from the ring's median brightness, i.e. furniture, are left out) plus
+    grain of the ring's own strength. None when too little of the ring is wall."""
+    h, w = img.shape[:2]
+    x0, y0, x1, y1 = box
+    ox0, oy0, ox1, oy1 = max(0, x0 - ring), max(0, y0 - ring), min(w - 1, x1 + ring), min(h - 1, y1 + ring)
+    mask = np.zeros((h, w), bool)
+    mask[oy0 : oy1 + 1, ox0 : ox1 + 1] = True
+    mask[y0 : y1 + 1, x0 : x1 + 1] = False
+    ys, xs = np.nonzero(mask)
+    vals = img[ys, xs].astype(np.float32)
+    lum = vals.mean(axis=1)
+    med = float(np.median(lum))
+    mad = float(np.median(np.abs(lum - med))) + 1.0
+    keep = np.abs(lum - med) < 3.0 * mad
+    if keep.sum() < 200:
+        return None
+    sx, sy = max(1.0, (x1 - x0) / 2.0), max(1.0, (y1 - y0) / 2.0)
+    cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+
+    def design(xx, yy):
+        u, v = (xx - cx) / sx, (yy - cy) / sy
+        return np.stack([np.ones_like(u), u, v, u * u, u * v, v * v], axis=-1)
+
+    a = design(xs[keep].astype(np.float32), ys[keep].astype(np.float32))
+    coef, *_ = np.linalg.lstsq(a, vals[keep], rcond=None)
+    gy, gx = np.mgrid[y0 : y1 + 1, x0 : x1 + 1].astype(np.float32)
+    fill = design(gx, gy) @ coef
+    grain = _wall_grain(img, box, med, fill.shape[:2])
+    return np.clip(fill + grain, 0, 255)
+
+
+def _wall_grain(img: np.ndarray, box: Tuple[int, int, int, int], med: float, shape) -> np.ndarray:
+    """The wall's own fine texture (plaster, paint grain) for an area of `shape`: the high-pass
+    of the plainest wall patch near box, mirrored to size. Zero when no plain patch is found."""
+    h, w = img.shape[:2]
+    x0, y0, x1, y1 = box
+    size = 72
+    lum = cv2.GaussianBlur(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32), (0, 0), 1.5)
+    grad = np.abs(np.diff(lum, axis=1))[:-1] + np.abs(np.diff(lum, axis=0))[:, :-1]
+    best = None
+    reach = max(x1 - x0, y1 - y0) // 2 + size
+    for py in range(max(0, y0 - reach), min(h - size, y1 + reach), 12):
+        for px in range(max(0, x0 - reach), min(w - size, x1 + reach), 12):
+            if px + size > x0 and px < x1 and py + size > y0 and py < y1:
+                continue
+            if abs(float(lum[py : py + size, px : px + size].mean()) - med) > 18:
+                continue
+            score = float(grad[py : py + size - 1, px : px + size - 1].mean())
+            if best is None or score < best[0]:
+                best = (score, px, py)
+    if best is None:
+        return np.zeros((*shape, 3), np.float32)
+    _, px, py = best
+    patch = img[py : py + size, px : px + size].astype(np.float32)
+    hp = patch - cv2.GaussianBlur(patch, (0, 0), 3.0)
+    reps = (shape[0] // size + 2, shape[1] // size + 2)
+    # Alternate mirrored copies so the tiles meet without seams.
+    row = np.concatenate([hp if i % 2 == 0 else hp[:, ::-1] for i in range(reps[1])], axis=1)
+    tiled = np.concatenate([row if i % 2 == 0 else row[::-1] for i in range(reps[0])], axis=0)
+    return tiled[: shape[0], : shape[1]]
+
+
+_ORIENTATION_AR = {"portrait": 0.75, "square": 1.0, "landscape": 4 / 3, "wide": 16 / 9, "tall": 9 / 16}
+
+SHRINK_MARGIN = 26
+SHRINK_RING = 16
+
+
+def shrink_frame(frame_bgr: np.ndarray, quad: np.ndarray, scale: float):
+    """Make a straight-on frame `scale` times its size (0 < scale < 1) about its own centre,
+    keeping its shape. The frame block (moulding plus a little shadow) is scaled down and the
+    wall it no longer covers is repainted from the plain wall round it. Returns (frame_bgr, quad)
+    or None."""
+    win = _axis_aligned_window(quad)
+    if win is None or not 0 < scale < 1:
+        return None
+    x0, y0, x1, y1 = win
+    h, w = frame_bgr.shape[:2]
+    lum = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    side, top = _frame_border(lum, win)
+    m = SHRINK_MARGIN
+    bx0, by0 = x0 - side - m, y0 - top - m
+    bx1, by1 = x1 + side + m, y1 + top + m
+    if bx0 < 1 or by0 < 1 or bx1 >= w - 1 or by1 >= h - 1:
+        return None
+    wall = _wall_model(frame_bgr, (bx0, by0, bx1, by1), SHRINK_RING)
+    if wall is None:
+        return None
+    region = frame_bgr[by0 : by1 + 1, bx0 : bx1 + 1].astype(np.float32)
+    bh, bw = region.shape[:2]
+    # Poisson blending takes the model's smooth shading and the real wall's colour at the
+    # block's edge, so the repainted wall shows no seam.
+    src = frame_bgr.copy()
+    src[by0 : by1 + 1, bx0 : bx1 + 1] = np.clip(wall, 0, 255).astype(frame_bgr.dtype)
+    mask = np.zeros((h, w), np.uint8)
+    mask[by0 : by1 + 1, bx0 : bx1 + 1] = 255
+    center = (bx0 + bw // 2, by0 + bh // 2)
+    cloned = cv2.seamlessClone(src, frame_bgr, mask, center, cv2.NORMAL_CLONE)
+    base = cloned[by0 : by1 + 1, bx0 : bx1 + 1].astype(np.float32)
+
+    nw, nh = max(8, int(round(bw * scale))), max(8, int(round(bh * scale)))
+    small = cv2.resize(region, (nw, nh), interpolation=cv2.INTER_AREA)
+    wcx, wcy = (x0 + x1) / 2.0 - bx0, (y0 + y1) / 2.0 - by0
+    px0, py0 = int(round(wcx - wcx * scale)), int(round(wcy - wcy * scale))
+    # The scaled block's own shadow margin fades into the repainted wall.
+    sm = max(2, int(round(m * scale)))
+    rr = np.minimum.outer(np.minimum(np.arange(nh), np.arange(nh)[::-1]), np.minimum(np.arange(nw), np.arange(nw)[::-1]))
+    alpha = np.clip(rr / float(sm), 0.0, 1.0)[..., None].astype(np.float32)
+    patch = base[py0 : py0 + nh, px0 : px0 + nw]
+    base[py0 : py0 + nh, px0 : px0 + nw] = small * alpha + patch * (1.0 - alpha)
+    out = frame_bgr.copy()
+    out[by0 : by1 + 1, bx0 : bx1 + 1] = np.clip(base, 0, 255).astype(frame_bgr.dtype)
+
+    nx0 = bx0 + px0 + int(round((x0 - bx0) * scale))
+    ny0 = by0 + py0 + int(round((y0 - by0) * scale))
+    nx1 = nx0 + int(round((x1 - x0 + 1) * scale)) - 1
+    ny1 = ny0 + int(round((y1 - y0 + 1) * scale)) - 1
+    new_quad = np.array([[nx0 - 1, ny0 - 1], [nx1 + 1, ny0 - 1], [nx1 + 1, ny1 + 1], [nx0 - 1, ny1 + 1]], dtype=np.float32)
+    return out, new_quad
+
+
 def _busy(lum: np.ndarray) -> bool:
     """True when the wall strip holds objects (any real edges), not just plaster texture."""
     if lum.shape[0] < 3 or lum.shape[1] < 3:
@@ -1571,10 +1694,25 @@ def rework_room(frame_bgr: np.ndarray, quad: np.ndarray, meta: dict):
             frame_bgr, box = thin_moulding(frame_bgr, win, moulding_max, short)
             quad = _quad_for_box(box)
         changed = True
+    # Reviewer-measured px per side of a shadow rim between window and moulding; for thin pale
+    # mouldings, where expand_to_edge would jump the moulding to the wall.
+    rim = meta.get("rim")
+    win = _axis_aligned_window(quad) if rim else None
+    if win is not None:
+        ring = {side: int(rim.get(side, 0)) for side in ("left", "right", "top", "bottom")}
+        frame_bgr, box = _extend_box(frame_bgr, win, ring)
+        quad = _quad_for_box(box)
+        changed = True
     if meta.get("grow"):
         grown = enlarge_frame(frame_bgr, quad)
         if grown is not None:
             frame_bgr, quad = grown
+            changed = True
+    # A reviewer-set scale is relative to the size the room showed after growing.
+    if meta.get("scale"):
+        shrunk = shrink_frame(frame_bgr, quad, float(meta["scale"]))
+        if shrunk is not None:
+            frame_bgr, quad = shrunk
             changed = True
     return frame_bgr, quad, changed
 
@@ -1614,7 +1752,7 @@ def composite_painting_into_frame(
     if stored_quad is not None and frame_alpha is None and not is_base and not meta.get("baked"):
         frame_resized, stored_quad, reworked = rework_room(frame_resized, stored_quad, meta)
     adapted = None
-    if FRAME_ADAPT and stored_quad is not None:
+    if FRAME_ADAPT and stored_quad is not None and not meta.get("perspective"):
         ph, pw = painting_crop.shape[:2]
         adapted = adapt_frame_to_painting(frame_resized, frame_alpha, stored_quad, pw / max(ph, 1))
     if adapted is not None:
@@ -1627,6 +1765,16 @@ def composite_painting_into_frame(
         hole = (frame_alpha < 16).astype(np.uint8) * 255
         warped, geom_mask = fit_painting_to_quad(painting_crop, alpha_quad, mat_ratio, max_crop)
         region_mask = cv2.bitwise_and(hole, cv2.bitwise_and(geom_mask, _mask_from_quad(alpha_quad, canvas_size)))
+    elif stored_quad is not None and meta.get("perspective"):
+        # A frame seen at an angle: its apparent shape says little about its real one, so the
+        # painting (trimmed towards the frame's real shape) fills the opening corner to corner.
+        quad = stored_quad
+        real_ar = float(meta["perspective"]) if not isinstance(meta["perspective"], bool) else _ORIENTATION_AR.get(str(orientation).lower(), 0.75)
+        trimmed = _trim_towards_aspect(painting_crop, real_ar, max_crop)
+        qw, qh = _quad_dimensions(quad)
+        trimmed = _resize_painting(trimmed, max(int(qw), 1), max(int(qh), 1))
+        warped = _warp_rect_to_quad(trimmed, quad, canvas_size)
+        region_mask = _mask_from_quad(quad, canvas_size)
     elif stored_quad is not None:
         quad = stored_quad
         warped, geom_mask = fit_painting_to_quad(painting_crop, quad, mat_ratio, max_crop)

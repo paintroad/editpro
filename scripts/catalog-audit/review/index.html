@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Paintroad catalog review</title>
+<style>
+  :root { --bg:#f6f4ef; --ink:#222; --mute:#777; --line:#ddd6c8; --add:#1f7a3a; --addbg:#e3f3e7; --rem:#b3261e; --rembg:#fbe4e2; --flag:#c77700; --ok:#1f7a3a; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.4 system-ui, Segoe UI, Arial, sans-serif; color:var(--ink); background:var(--bg); height:100vh; display:flex; flex-direction:column; }
+  header { display:flex; gap:12px; align-items:center; padding:8px 14px; border-bottom:1px solid var(--line); background:#fff; flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0 8px 0 0; }
+  .tabs button { border:1px solid var(--line); background:#fff; padding:5px 12px; cursor:pointer; border-radius:6px; }
+  .tabs button.on { background:#222; color:#fff; border-color:#222; }
+  .progress { margin-left:auto; color:var(--mute); }
+  .save { color:var(--mute); font-size:12px; }
+  a.btn, button.btn { border:1px solid var(--line); background:#fff; padding:5px 10px; border-radius:6px; cursor:pointer; color:inherit; text-decoration:none; font-size:13px; }
+  .filters { display:flex; gap:8px; padding:8px 14px; background:#fbfaf7; border-bottom:1px solid var(--line); flex-wrap:wrap; align-items:center; }
+  .filters select, .filters input { padding:4px 6px; border:1px solid var(--line); border-radius:5px; background:#fff; font-size:13px; }
+  .filters label { font-size:12px; color:var(--mute); display:flex; gap:4px; align-items:center; }
+  main { flex:1; display:flex; min-height:0; }
+  #list { width:330px; overflow:auto; border-right:1px solid var(--line); background:#fff; }
+  .li { display:flex; gap:8px; padding:6px 8px; border-bottom:1px solid #f0ece4; cursor:pointer; align-items:center; }
+  .li img { width:44px; height:44px; object-fit:contain; background:#f3f0ea; flex:none; }
+  .li .t { font-size:12px; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+  .li .m { font-size:11px; color:var(--mute); }
+  .li.on { background:#fff3d6; }
+  .li .st { margin-left:auto; font-size:11px; font-weight:bold; flex:none; }
+  .st.flagged { color:var(--flag); } .st.approved { color:var(--ok); }
+  #detail { flex:1; overflow:auto; padding:16px 22px; display:flex; gap:22px; }
+  #detail .img { flex:0 0 46%; max-width:620px; }
+  #detail .img img { width:100%; max-height:76vh; object-fit:contain; background:#ece8df; border-radius:6px; }
+  #detail .info { flex:1; min-width:320px; }
+  h2 { margin:0 0 4px; font-size:20px; }
+  .sub { color:var(--mute); font-size:12px; margin-bottom:12px; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 14px; }
+  .chip { padding:3px 9px; border-radius:14px; font-size:12px; border:1px solid var(--line); background:#fff; }
+  .chip.add { background:var(--addbg); color:var(--add); border-color:#b9dfc3; font-weight:600; }
+  .chip.rem { background:var(--rembg); color:var(--rem); border-color:#efbcb7; text-decoration:line-through; font-weight:600; }
+  .chip.room { color:#999; }
+  .change { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin-bottom:8px; background:#fff; display:flex; gap:10px; align-items:flex-start; }
+  .change .what { font-weight:700; min-width:250px; }
+  .change .what.add { color:var(--add); } .change .what.remove { color:var(--rem); }
+  .change .why { color:#444; font-size:13px; flex:1; }
+  .change .conf { font-size:11px; color:var(--mute); white-space:nowrap; }
+  .change.disagree { outline:2px solid var(--flag); background:#fff7e6; }
+  .change button { font-size:11px; border:1px solid var(--line); background:#fff; border-radius:5px; cursor:pointer; padding:2px 6px; white-space:nowrap; }
+  .note { font-size:12px; color:#555; background:#eef4fb; border-radius:6px; padding:5px 8px; margin:4px 0; }
+  .fb { margin-top:14px; padding:10px; border-radius:8px; background:#fff; border:1px solid var(--line); }
+  .fb textarea { width:100%; min-height:70px; font:inherit; padding:6px; border:1px solid var(--line); border-radius:6px; }
+  .fb .row { display:flex; gap:8px; align-items:center; margin-bottom:6px; }
+  .status { font-weight:700; }
+  .status.flagged { color:var(--flag); } .status.approved { color:var(--ok); }
+  .keys { font-size:12px; color:var(--mute); margin-top:10px; }
+  kbd { border:1px solid #ccc; border-bottom-width:2px; border-radius:4px; padding:0 5px; font-size:11px; background:#fff; }
+  .desc { font-size:12px; color:#555; margin:8px 0; }
+  .ctx { font-size:13px; padding:6px 10px; background:#fff3d6; border-bottom:1px solid var(--line); }
+  #coll, #rules { flex:1; overflow:auto; padding:14px 18px; }
+  table { border-collapse:collapse; width:100%; background:#fff; font-size:12.5px; }
+  th, td { border-bottom:1px solid #eee7da; padding:6px 8px; text-align:left; vertical-align:top; }
+  th { position:sticky; top:0; background:#f1ede4; cursor:pointer; }
+  tr:hover td { background:#fffaf0; }
+  .num { text-align:right; white-space:nowrap; }
+  .tag-new { background:#222; color:#fff; font-size:10px; border-radius:4px; padding:1px 5px; margin-left:4px; }
+  .small { font-size:11px; color:var(--mute); }
+  .moved { color:var(--flag); font-weight:600; }
+  .cfb { width:100%; min-width:160px; font:inherit; font-size:12px; border:1px solid var(--line); border-radius:4px; }
+  .roombox { border:2px solid #222; border-radius:10px; padding:10px 12px; margin:6px 0 14px; background:#fff; }
+  .roombox .big { font-size:22px; font-weight:800; }
+  .roombox .big .lab { font-size:12px; font-weight:600; color:var(--mute); text-transform:uppercase; letter-spacing:.05em; margin-right:6px; }
+  .roombox .why { font-size:12px; color:#555; margin:2px 0 8px; }
+  .roombox .pick { display:flex; flex-wrap:wrap; gap:5px; }
+  .roombox .pick button { font-size:12px; border:1px solid var(--line); background:#faf8f3; border-radius:14px; padding:3px 10px; cursor:pointer; }
+  .roombox .pick button.prop { border-color:#222; font-weight:700; }
+  .roombox .pick button.mine { background:#222; color:#fff; border-color:#222; }
+  .roombox.changed { border-color:var(--flag); background:#fff7e6; }
+  .li .rm { font-size:11px; color:#333; font-weight:600; }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Catalog review</h1>
+  <div class="tabs"><button data-tab="products" class="on">Products</button> <button data-tab="coll">Collections</button> <button data-tab="rules">Rules</button></div>
+  <span class="save" id="save"></span>
+  <span class="progress" id="progress"></span>
+  <a class="btn" href="export">Export feedback</a>
+</header>
+<div class="filters" id="filters">
+  <label>Show <select id="fScope"><option value="changed">Changed products</option><option value="all">All products</option></select></label>
+  <label>Collection <select id="fColl"><option value="">Any</option></select></label>
+  <label>In collection <select id="fCollMode"><option value="any">leaving + joining</option><option value="leaving">leaving</option><option value="joining">joining</option><option value="staying">staying</option><option value="all">everything</option></select></label>
+  <label>Rule <select id="fRule"><option value="">Any</option></select></label>
+  <label>Change <select id="fAct"><option value="">Any</option><option value="remove">Removals</option><option value="add">Additions</option></select></label>
+  <label>Confidence <select id="fConf"><option value="">Any</option><option>high</option><option>medium</option><option>low</option></select></label>
+  <label>Family <select id="fFam"><option value="">Any</option></select></label>
+  <label>Best room <select id="fRoom"><option value="">Any</option></select></label>
+  <label>Room confidence <select id="fRoomConf"><option value="">Any</option><option>high</option><option>medium</option><option>low</option><option value="mine">changed by me</option></select></label>
+  <label>Review <select id="fStatus"><option value="">Any</option><option value="none">Not reviewed</option><option value="flagged">Flagged</option><option value="approved">Approved</option></select></label>
+  <input id="fq" placeholder="Search title" size="18">
+  <span class="small" id="count"></span>
+</div>
+<main>
+  <div id="products-view" style="display:flex;flex:1;min-height:0">
+    <div id="list"></div>
+    <div style="flex:1;display:flex;flex-direction:column;min-height:0">
+      <div class="ctx hidden" id="ctx"></div>
+      <div id="detail"></div>
+    </div>
+  </div>
+  <div id="coll" class="hidden"></div>
+  <div id="rules" class="hidden"></div>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

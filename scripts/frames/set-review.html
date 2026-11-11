@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lifestyle set review</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, sans-serif; background: #1d1d1f; color: #eee; display: flex; height: 100vh; }
+  #side { width: 270px; padding: 12px; border-right: 1px solid #333; overflow: auto; }
+  #main { flex: 1; display: flex; flex-direction: column; padding: 12px 16px; min-width: 0; }
+  h1 { font-size: 24px; margin: 0; }
+  .muted { color: #999; }
+  select, textarea, button { font: inherit; }
+  select { width: 100%; margin: 4px 0 10px; padding: 4px; }
+  #stage { flex: 1; display: grid; grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr); gap: 16px; min-height: 0; }
+  #stage.compare { grid-template-columns: 1fr 1fr; }
+  #stage:not(.compare) .before { display: none; }
+  .before .label { color: #ff9f0a; }
+  .pane { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 0; min-height: 0; }
+  .pane .label { margin-bottom: 4px; color: #aaa; }
+  .pane img { flex: 1; min-height: 0; max-width: 100%; object-fit: contain; background: #6e6e73; }
+  #tabs { display: flex; gap: 6px; margin-bottom: 4px; }
+  #bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+  button { padding: 6px 12px; border-radius: 6px; border: 1px solid #555; background: #2c2c2e; color: #eee; cursor: pointer; }
+  button.on { background: #0a84ff; border-color: #0a84ff; }
+  button.ok { background: #1f7a3a; } button.bad { background: #8a1f1f; }
+  #mic.live { background: #d70015; border-color: #d70015; }
+  textarea { width: 100%; height: 64px; background: #111; color: #eee; border: 1px solid #444; border-radius: 6px; padding: 8px; }
+  #status { font-weight: 600; }
+  kbd { background: #333; border-radius: 4px; padding: 0 5px; font-size: 12px; }
+  #help p { margin: 4px 0; }
+  #counts p { margin: 2px 0; cursor: pointer; }
+  #counts p:hover { color: #fff; }
+  #strip { display: flex; gap: 4px; margin-top: 6px; overflow-x: auto; }
+  #strip span { padding: 2px 7px; border-radius: 4px; background: #333; font-size: 12px; cursor: pointer; white-space: nowrap; }
+  #strip span.cur { outline: 2px solid #0a84ff; }
+  #strip span.approved { background: #1f7a3a; } #strip span.rejected { background: #8a1f1f; } #strip span.noted { background: #7a6a10; }
+</style>
+</head>
+<body>
+<div id="side">
+  <div class="muted">Set</div>
+  <select id="set"></select>
+  <div class="muted">Show</div>
+  <select id="show">
+    <option value="todo">Not reviewed yet</option>
+    <option value="all">All</option>
+    <option value="done">Reviewed</option>
+  </select>
+  <div id="counts"></div>
+  <hr style="border-color:#333">
+  <div id="help" class="muted">
+    <p><kbd>Enter</kbd> approve and next</p>
+    <p>When every room in a set is approved (index image not needed), it jumps to the next set with rooms to review.</p>
+    <p><kbd>R</kbd> reject and next</p>
+    <p><kbd>0</kbd> or <kbd>B</kbd> blank room, <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> samples (Sample 1 opens first)</p>
+    <p><kbd>N</kbd> / <kbd>P</kbd> next / previous</p>
+    <p>Hold <kbd>Space</kbd> or click Mic to speak a note</p>
+    <p>A note without a decision is saved as a note to fix.</p>
+  </div>
+</div>
+<div id="main">
+  <div style="display:flex;align-items:baseline;gap:16px">
+    <h1 id="title">&hellip;</h1>
+    <span id="where" class="muted"></span>
+    <span id="status"></span>
+    <span id="pos" class="muted" style="margin-left:auto"></span>
+  </div>
+  <div id="tabs"></div>
+  <div id="stage">
+    <div class="pane before"><div class="label" id="beforeLabel">Before</div><img id="imgB" alt=""></div>
+    <div class="pane"><div class="label" id="afterLabel">After</div><img id="imgA" alt=""></div>
+  </div>
+  <div id="strip"></div>
+  <div id="bar">
+    <button class="ok" id="approve">Approve (Enter)</button>
+    <button class="bad" id="reject">Reject (R)</button>
+    <button id="mic">&#127908; Mic</button>
+    <button id="prev">&larr; Prev (P)</button>
+    <button id="next">Next (N) &rarr;</button>
+  </div>
+  <div id="history" class="muted" style="margin-bottom:6px"></div>
+  <textarea id="note" placeholder="Feedback for this slide (speak or type)"></textarea>
+</div>
+<script>
+let items = [], feedback = {}, list = [], idx = 0, item = null, view = 1; // view 0 = blank room, n = sample n
+const $ = (id) => document.getElementById(id);
+const fbOf = (it) => feedback[it.key] || {};
+// The first batch of sets (29 Oct), built before the Modern / Kitchen / Kids / Motivational / Statement round.
+const isOlder = (set) => /^\S+\s+(devotional|traditional|contemporary|mixed)\s+\d/i.test(set);
+const GROUPS = { all: () => true, new: (s) => !isOlder(s), older: isOlder };
+const inSetFilter = (s) => (GROUPS[$("set").value] || ((x) => x === $("set").value))(s);
+
+async function load() {
+  const data = await (await fetch("api/items")).json();
+  items = data.items; feedback = data.feedback;
+  const sets = [...new Set(items.map((i) => i.set))];
+  const fresh = sets.filter((s) => !isOlder(s)), older = sets.filter(isOlder);
+  const opts = (list) => list.map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join("");
+  $("set").innerHTML = `<option value="all">All sets (${sets.length})</option>` +
+    `<option value="new">New sets only (${fresh.length})</option>` +
+    (older.length ? `<option value="older">Older sets only (${older.length})</option>` : "") +
+    `<optgroup label="New sets">${opts(fresh)}</optgroup>` +
+    (older.length ? `<optgroup label="Older sets">${opts(older)}</optgroup>` : "");
+  rebuild();
+}
+
+function rebuild(keepKey) {
+  const show = $("show").value;
+  list = items.filter((it) => inSetFilter(it.set) &&
+    (show === "all" || (show === "done") === Boolean(fbOf(it).status)));
+  // reworked slides waiting for a fresh decision come first
+  const reworked = (it) => (fbOf(it).history && !fbOf(it).status ? 0 : 1);
+  list.sort((a, b) => reworked(a) - reworked(b));
+  idx = Math.max(0, keepKey ? list.findIndex((it) => it.key === keepKey) : 0);
+  counts();
+  open();
+}
+
+function counts() {
+  const sets = [...new Set(items.map((i) => i.set))];
+  const total = items.filter((it) => fbOf(it).status).length;
+  const row = (s) => {
+    const all = items.filter((it) => it.set === s);
+    const st = (k) => all.filter((it) => fbOf(it).status === k).length;
+    const done = all.filter((it) => fbOf(it).status).length;
+    const colour = done === all.length ? (st("rejected") || st("noted") ? "#ffd60a" : "#30d158") : "#aaa";
+    return `<p data-set="${esc(s)}" style="color:${colour}">${esc(s.replace(/ - .*/, ""))}: ${done}/${all.length}` +
+      `${st("rejected") ? ` \u2717${st("rejected")}` : ""}${st("noted") ? ` \u2022${st("noted")}` : ""}</p>`;
+  };
+  const older = sets.filter(isOlder);
+  $("counts").innerHTML = `<p><b>${total} / ${items.length} slides reviewed</b></p>` +
+    `<p class="muted" style="margin-top:8px">NEW SETS</p>` + sets.filter((s) => !isOlder(s)).map(row).join("") +
+    (older.length ? `<p class="muted" style="margin-top:8px">OLDER SETS</p>` + older.map(row).join("") : "");
+  for (const p of $("counts").querySelectorAll("p[data-set]")) p.onclick = () => { $("set").value = p.dataset.set; $("show").value = "all"; rebuild(); };
+}
+
+function open() {
+  item = list[idx];
+  if (!item) { $("title").textContent = "Nothing left here"; $("where").textContent = ""; $("pos").textContent = ""; $("imgA").src = ""; $("imgB").src = ""; $("tabs").innerHTML = ""; $("stage").classList.remove("compare"); $("strip").innerHTML = ""; return; }
+  const fb = fbOf(item);
+  const last = (fb.history || []).slice(-1)[0];
+  $("history").innerHTML = last ? `<b>Round ${fb.history.length + 1}.</b> Your note: \u201c${esc(last.note)}\u201d. Done: ${esc(last.done || "")}` : "";
+  $("title").textContent = `${item.slide}. ${item.room}`;
+  $("where").innerHTML = (isOlder(item.set) ? `<span style="background:#5e5ce6;color:#fff;border-radius:4px;padding:1px 6px;margin-right:6px">Older set</span>` : "") + esc(item.set);
+  $("pos").textContent = `${idx + 1} of ${list.length}`;
+  $("note").value = fb.note || "";
+  showStatus(fb);
+  $("stage").classList.toggle("compare", Boolean(item.before));
+  view = item.samples.length ? 1 : 0;
+  showView();
+  const siblings = items.filter((it) => it.set === item.set);
+  $("strip").innerHTML = siblings.map((it) => `<span data-key="${esc(it.key)}" class="${fbOf(it).status || ""} ${it.key === item.key ? "cur" : ""}">${it.slide}. ${esc(it.room)}</span>`).join("");
+  for (const s of $("strip").querySelectorAll("span")) s.onclick = () => jump(s.dataset.key);
+}
+
+function showView() {
+  const n = item.samples.length, k = encodeURIComponent(item.key), v = (fbOf(item).history || []).length;
+  // God-only rooms are rendered for fewer paintings, so tabs keep the file's own sample number.
+  const names = ["Blank", ...item.samples.map((s) => s.split(" - ")[0])];
+  $("tabs").innerHTML = names.map((t, i) => `<button class="${i === view ? "on" : ""}" data-i="${i}">${t} (${i === 0 ? "0" : i})</button>`).join("") +
+    (n ? "" : ` <span class="muted">No sample render for this slide</span>`);
+  for (const b of $("tabs").querySelectorAll("button")) b.onclick = () => { view = Number(b.dataset.i); showView(); };
+  const name = names[view].toLowerCase().replace("blank", "blank room");
+  if (view === 0) {
+    $("imgA").src = `img?key=${k}&v=${v}`;
+    $("imgA").title = "";
+    $("imgB").src = item.before ? `img?key=${k}&before=1` : "";
+    $("beforeLabel").textContent = "Before: blank room";
+  } else {
+    const s = item.samples[view - 1];
+    $("imgA").src = `img?key=${k}&sample=${encodeURIComponent(s)}&v=${v}`;
+    $("imgA").title = s;
+    // The before sample with the same painting (sample files start "Sample N - <painting> - ").
+    const prefix = s.split(" - ").slice(0, 2).join(" - ") + " - ";
+    const b = item.before ? (item.beforeSamples || []).find((f) => f.startsWith(prefix)) || (item.beforeSamples || [])[view - 1] : null;
+    $("imgB").src = b ? `img?key=${k}&before=1&sample=${encodeURIComponent(b)}` : "";
+    $("beforeLabel").textContent = b ? `Before: ${name}` : "Before: no matching sample";
+  }
+  $("afterLabel").textContent = item.before ? `After: ${name}` : names[view].replace("Blank", "Blank room");
+}
+
+function showStatus(fb) {
+  const s = fb.status;
+  $("status").textContent = s ? ({ approved: "\u2713 approved", rejected: "\u2717 rejected", noted: "\u2022 note saved" }[s] || s) : "";
+  $("status").style.color = s === "approved" ? "#30d158" : s === "rejected" ? "#ff453a" : "#ffd60a";
+}
+
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+async function store(status) {
+  if (!item) return;
+  const prev = fbOf(item);
+  const entry = { ...prev, note: $("note").value.trim() };
+  if (status) entry.status = status;
+  else if (!entry.status && entry.note) entry.status = "noted";
+  const empty = !entry.status && !entry.note && !entry.history;
+  if (empty) delete feedback[item.key]; else feedback[item.key] = entry;
+  await fetch("api/feedback", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: item.key, entry: empty ? null : entry }) });
+  showStatus(entry); counts();
+}
+
+// The index slide does not count towards a set being done.
+const isIndex = (it) => /^Index image/.test(it.room);
+const pendingIn = (set) => items.find((it) => it.set === set && !isIndex(it) && !fbOf(it).status);
+function nextPendingRoom(set) {
+  const group = GROUPS[$("set").value] ? $("set").value : isOlder(set) ? "older" : "new";
+  const sets = [...new Set(items.map((i) => i.set))].filter((s) => s === set || GROUPS[group](s));
+  const at = sets.indexOf(set);
+  for (let k = 1; k < sets.length; k++) {
+    const p = pendingIn(sets[(at + k) % sets.length]);
+    if (p) return p;
+  }
+  return null;
+}
+
+async function decide(status) {
+  await store(status);
+  const done = item.set;
+  if (items.filter((it) => it.set === done && !isIndex(it)).every((it) => fbOf(it).status === "approved")) {
+    const p = nextPendingRoom(done);
+    if (p) {
+      if (!GROUPS[$("set").value]) $("set").value = p.set;
+      if ($("show").value === "done") $("show").value = "todo";
+      rebuild(p.key);
+      $("status").textContent = `\u2713 ${done.replace(/ - .*/, "")} all approved \u2014 next set`;
+      $("status").style.color = "#30d158";
+      return;
+    }
+  }
+  if ($("show").value === "todo") { list.splice(idx, 1); if (idx >= list.length) idx = list.length - 1; }
+  else idx = Math.min(idx + 1, list.length - 1);
+  open();
+}
+
+async function go(step) { await store(); idx = Math.min(Math.max(0, idx + step), list.length - 1); open(); }
+
+async function jump(key) {
+  await store();
+  let i = list.findIndex((it) => it.key === key);
+  if (i < 0) { $("show").value = "all"; rebuild(key); return; }
+  idx = i; open();
+}
+
+// Speech to text (Edge and Chrome).
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, listening = false;
+if (SR) {
+  rec = new SR(); rec.lang = "en-IN"; rec.continuous = true; rec.interimResults = false;
+  rec.onresult = (e) => {
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) {
+        const t = e.results[i][0].transcript.trim();
+        $("note").value = ($("note").value ? $("note").value + " " : "") + t;
+      }
+    }
+    store();
+  };
+  rec.onend = () => { if (listening) rec.start(); };
+} else { $("mic").title = "Speech needs Edge or Chrome"; }
+function micOn() { if (!rec || listening) return; listening = true; rec.start(); $("mic").classList.add("live"); }
+function micOff() { if (!rec || !listening) return; listening = false; rec.stop(); $("mic").classList.remove("live"); }
+
+$("mic").onclick = () => (listening ? micOff() : micOn());
+$("approve").onclick = () => decide("approved");
+$("reject").onclick = () => decide("rejected");
+$("prev").onclick = () => go(-1);
+$("next").onclick = () => go(1);
+$("set").onchange = () => rebuild();
+$("show").onchange = () => rebuild();
+$("note").addEventListener("blur", () => store());
+
+document.addEventListener("keydown", (e) => {
+  if (document.activeElement === $("note")) { if (e.key === "Escape") $("note").blur(); return; }
+  if (e.key === "Enter") decide("approved");
+  else if (e.key === "r" || e.key === "R") decide("rejected");
+  else if (e.key === "n" || e.key === "N" || e.key === "ArrowRight") go(1);
+  else if (e.key === "p" || e.key === "P" || e.key === "ArrowLeft") go(-1);
+  else if (/^[0-9]$/.test(e.key) && item && Number(e.key) <= item.samples.length) { view = Number(e.key); showView(); }
+  else if ((e.key === "b" || e.key === "B") && item) { view = 0; showView(); }
+  else if (e.key === " " && !e.repeat) { micOn(); e.preventDefault(); }
+});
+document.addEventListener("keyup", (e) => { if (e.key === " " && document.activeElement !== $("note")) micOff(); });
+
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,676 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Final check</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, sans-serif; background: #1d1d1f; color: #eee; display: flex; height: 100vh; }
+  #side { width: 250px; padding: 12px; border-right: 1px solid #333; overflow: auto; flex-shrink: 0; }
+  #main { flex: 1; display: flex; flex-direction: column; padding: 12px 16px; min-width: 0; }
+  h1 { font-size: 28px; margin: 0; }
+  .muted { color: #999; }
+  select, textarea, button { font: inherit; }
+  select { width: 100%; margin: 4px 0 10px; padding: 4px; }
+  #stage { flex: 1; display: flex; gap: 16px; align-items: center; justify-content: center; min-height: 0; }
+  .pane { position: relative; height: 100%; display: flex; flex-direction: column; align-items: center; min-width: 0; flex: 1; }
+  .pane .label { margin-bottom: 4px; color: #aaa; text-align: center; }
+  canvas { max-height: calc(100% - 44px); max-width: 100%; background: #000; }
+  .pane .info { margin-top: 4px; font-size: 12px; color: #aaa; text-align: center; min-height: 16px; }
+  .warn { color: #ffd60a; } .bad-t { color: #ff453a; } .good-t { color: #30d158; }
+  #bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+  button { padding: 6px 12px; border-radius: 6px; border: 1px solid #555; background: #2c2c2e; color: #eee; cursor: pointer; }
+  button.ok { background: #1f7a3a; border-color: #1f7a3a; }
+  button.half { background: #a07800; border-color: #a07800; }
+  button.bad { background: #8a1f1f; border-color: #8a1f1f; }
+  #upYes.on { background: #1f7a3a; border-color: #30d158; }
+  #upNo.on { background: #8a1f1f; border-color: #ff453a; }
+  #mic.live { background: #d70015; border-color: #d70015; }
+  textarea { width: 100%; height: 64px; background: #111; color: #eee; border: 1px solid #444; border-radius: 6px; padding: 8px; }
+  #status { font-weight: 600; }
+  kbd { background: #333; border-radius: 4px; padding: 0 5px; font-size: 12px; }
+  #help p { margin: 4px 0; }
+  #counts p { margin: 2px 0 6px; }
+  .hidden { display: none !important; }
+  .zoomwrap { position: relative; overflow: hidden; display: inline-block; background: #000; cursor: zoom-in; line-height: 0; flex-shrink: 0; }
+  .zoomwrap.zoomed { cursor: grab; }
+  .zoomwrap.dragging { cursor: grabbing; }
+  #pzoom { transform-origin: 0 0; position: relative; }
+  #pzoom canvas { max-height: none; display: block; }
+  #pfull { position: absolute; inset: 0; width: 100%; height: 100%; display: none; }
+  #zoomTag { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,0.7); color: #fff; font-size: 12px; line-height: 1.4;
+    padding: 2px 6px; border-radius: 4px; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="side">
+  <div class="muted">Group</div>
+  <select id="group">
+    <option value="reviewed" selected>1. Reviewed</option>
+    <option value="pending">2. Pending review</option>  </select>
+  <div class="muted">Resolution (at the largest size sold)</div>
+  <select id="res">
+    <option value="all" selected>All</option>
+    <option value="low">Too low (under 100 ppi)</option>
+    <option value="border">Borderline (100&ndash;150 ppi)</option>
+    <option value="good">Good (150&ndash;200 ppi)</option>
+    <option value="great">Very good (200+ ppi)</option>
+  </select>
+  <div class="muted">Status</div>
+  <select id="show">
+    <option value="all" selected>All</option>
+    <option value="approved">Approved (both fine)</option>
+    <option value="printable">Printable wrong</option>
+    <option value="delete">Delete</option>
+    <option value="pending">Pending review</option>
+    <option value="action">Action needed (your notes)</option>
+  </select>
+  <div class="muted">Upscale</div>
+  <select id="up">
+    <option value="all" selected>All</option>
+    <option value="unmarked">Not marked yet</option>
+    <option value="yes">Yes, upscale</option>
+    <option value="no">No upscale</option>
+    <option value="topaz">Already upscaled with Topaz</option>
+  </select>
+  <div id="counts"></div>
+  <hr style="border-color:#333">
+  <div id="help" class="muted">
+    <p><kbd>Enter</kbd> both fine</p>
+    <p><kbd>+</kbd> crop fine, printable wrong</p>
+    <p><kbd>PgDn</kbd> / <kbd>3</kbd> next painting</p>
+    <p><kbd>PgUp</kbd> / <kbd>9</kbd> previous painting</p>
+    <p><kbd>&larr;</kbd><kbd>&rarr;</kbd><kbd>&uarr;</kbd><kbd>&darr;</kbd> or numpad <kbd>4</kbd><kbd>6</kbd><kbd>8</kbd><kbd>2</kbd> move crop (<kbd>Shift</kbd> = bigger step), then <kbd>Enter</kbd> to keep it</p>
+    <p><kbd>C</kbd> reset crop &middot; a note puts the painting in action needed</p>
+    <p><kbd>Del</kbd> / numpad <kbd>.</kbd> / <kbd>D</kbd> mark painting for delete</p>
+    <p><kbd>O</kbd> show / hide optimised</p>
+    <p><kbd>Y</kbd> / <kbd>N</kbd> upscale yes / no, then next painting (not shown when Topaz already upscaled it)</p>
+    <p>Scroll on the printable to zoom, drag to move, double-click to reset</p>
+    <p>Hold <kbd>Space</kbd> or click Mic to speak a note</p>
+  </div>
+</div>
+<div id="main">
+  <div style="display:flex;align-items:baseline;gap:16px">
+    <h1 id="title">&hellip;</h1>
+    <span id="live" class="hidden" style="background:#ff453a;color:#fff;font-weight:700;padding:3px 10px;border-radius:4px;font-size:14px"></span>
+    <span id="where" class="muted"></span>
+    <span id="status"></span>
+    <span id="pos" class="muted" style="margin-left:auto"></span>
+  </div>
+  <div id="stage">
+    <div class="pane"><div class="label">Original (crop window outlined)</div><canvas id="orig"></canvas><div class="info" id="origInfo"></div></div>
+    <div class="pane hidden" id="cropPane"><div class="label" id="cropLabel">Final optimised</div><canvas id="crop"></canvas><div class="info" id="cropInfo"></div></div>
+    <div class="pane"><div class="label" id="printLabel">Final printable</div>
+      <div class="zoomwrap" id="pwrap" title="Scroll to zoom, drag to move, double-click to reset">
+        <div id="pzoom"><canvas id="print"></canvas><img id="pfull" alt=""></div>
+        <span id="zoomTag" class="hidden"></span>
+      </div>
+      <div class="info" id="printInfo"></div></div>
+  </div>
+  <div id="bar">
+    <button class="ok" id="approve">Both fine (Enter)</button>
+    <button class="half" id="cropOnly">Crop fine, printable wrong (+)</button>
+    <button class="bad" id="del">&#128465; Delete painting (Del / D)</button>
+    <button id="reset">Reset crop (C)</button>
+    <button id="toggleOpt">Show optimised (O)</button>
+    <span id="upBox" style="display:inline-flex;gap:6px;align-items:center;border-left:1px solid #444;border-right:1px solid #444;padding:0 8px">
+      <span class="muted">Upscale?</span>
+      <button id="upYes">Yes (Y)</button>
+      <button id="upNo">No (N)</button>
+    </span>
+    <span id="upTopaz" class="muted hidden" style="border-left:1px solid #444;border-right:1px solid #444;padding:0 8px">Already upscaled with Topaz</span>
+    <button id="mic">&#127908; Mic</button>
+    <span class="muted">Edge:</span>
+    <select id="regroup" style="width:auto;margin:0">
+      <option value="border">Painted border</option>
+      <option value="space">Blank space</option>
+      <option value="bleed">Edge to edge</option>
+    </select>
+    <button id="prev">&larr; Prev (PgUp / 9)</button>
+    <button id="next">Next (PgDn / 3) &rarr;</button>
+  </div>
+  <div id="history" class="muted" style="margin-bottom:6px"></div>
+  <textarea id="note" placeholder="Feedback for this painting (speak or type), then Submit note or Ctrl+Enter"></textarea>
+  <div style="display:flex;align-items:center;gap:10px;margin-top:4px">
+    <button class="half" id="submitNote">Submit note (Ctrl+Enter)</button>
+    <span id="noteSaved" class="muted"></span>
+  </div>
+</div>
+<script>
+let items = [], feedback = {}, final = {}, list = [], idx = 0, frac = null, item = null;
+let img = new Image(), fopt = null, fprint = null, pimg = null, pinfo = null, pLoading = false, pLive = null, pLiveKey = null;
+const $ = (id) => document.getElementById(id);
+const LABELS = {
+  approved: "\u2713 both fine", crop_only: "\u2713 crop fine, printable wrong", rejected: "\u2717 rejected both",
+  border: "\u25a3 border problem", noted: "\u2022 note saved", delete: "\u2717 marked for delete",
+  issue: "! action needed (your note)",
+};
+const COLOURS = { approved: "#30d158", crop_only: "#ffd60a", rejected: "#ff453a", border: "#ff453a", delete: "#ff453a",
+  issue: "#ff9f0a" };
+
+async function load() {
+  const data = await (await fetch("api/items")).json();
+  items = data.items; feedback = data.feedback; final = data.final || {};
+  rebuild();
+}
+
+function fb(it) { return feedback[it.key] || {}; }
+function edgeOf(it) { return fb(it).edge || it.edge; }
+const GROUP_LABELS = { reviewed: "1. Reviewed", pending: "2. Pending review" };
+const STATUS_LABELS = { approved: "approved", printable: "printable wrong", delete: "delete", pending: "pending review",
+  action: "action needed" };
+const UNDECIDED_GROUPS = ["pending"];
+// Action needed: a note waits for a fix. The fix scripts clear the note and set `revised`, which puts the
+// painting back in pending review until it is decided again. In pending review a note on a painting marked for
+// delete wins over the delete (unless the note itself just says delete).
+function deleteNote(note) { return /^\s*delete\.?\s*$/i.test(note || ""); }
+function statusOf(it) {
+  const e = fb(it), s = e.status, note = (e.note || "").trim();
+  if (s === "delete" && (!note || deleteNote(note) || !UNDECIDED_GROUPS.includes(it.group))) return "delete";
+  if (note || s === "issue" || s === "delete") return "action";
+  if (!e.checked && (e.revised || UNDECIDED_GROUPS.includes(it.group))) return "pending";
+  if (s === "crop_only") return "printable";
+  if (s === "approved" || (!s && it.path && !UNDECIDED_GROUPS.includes(it.group))) return "approved";
+  return "pending";
+}
+const RES_LABELS = { all: "All", low: "Too low (under 100 ppi)", border: "Borderline (100\u2013150 ppi)",
+  good: "Good (150\u2013200 ppi)", great: "Very good (200+ ppi)" };
+// Grade of the final printable at the largest size sold: 48" long side for 16:9, 36" for the rest.
+function resOf(it) {
+  const row = final[it.key];
+  if (!row || row.error || !row.printable_px) return "none";
+  const [w, h] = row.printable_px, r = Math.max(w, h) / Math.min(w, h);
+  const ppi = Math.max(w, h) / (r >= 1.5 ? 48 : 36);
+  return ppi < 100 ? "low" : ppi < 150 ? "border" : ppi < 200 ? "good" : "great";
+}
+function checked(it) { return Boolean(fb(it).checked); }
+const UP_LABELS = { all: "All", unmarked: "Not marked yet", yes: "Yes, upscale", no: "No upscale", topaz: "Already upscaled with Topaz" };
+function upscaleOf(it) { return it.topaz ? "topaz" : fb(it).upscale || "unmarked"; }
+function pendingNow(it) { return statusOf(it) === "pending"; }
+
+// Decided paintings stay in the list (PgUp reaches them); the list opens at the first painting pending review.
+function rebuild(keepKey) {
+  const group = $("group").value, show = $("show").value, res = $("res").value, up = $("up").value;
+  list = items.filter((it) => it.group === group && (res === "all" || resOf(it) === res) && (show === "all" || statusOf(it) === show) &&
+    (up === "all" || upscaleOf(it) === up));
+  const start = Math.max(0, list.findIndex(pendingNow));
+  idx = Math.max(0, keepKey ? list.findIndex((it) => it.key === keepKey) : start);
+  counts();
+  open();
+}
+
+function counts() {
+  const group = $("group").value;
+  const inGroup = items.filter((it) => it.group === group);
+  const tally = (arr) => arr.reduce((t, it) => { t[statusOf(it)] = (t[statusOf(it)] || 0) + 1; return t; }, {});
+  for (const opt of $("group").options) {
+    const n = tally(items.filter((it) => it.group === opt.value));
+    const total = Object.values(n).reduce((a, b) => a + b, 0);
+    opt.textContent = `${GROUP_LABELS[opt.value]} \u2014 ${total}${n.pending ? `, ${n.pending} pending` : ""}` +
+      (n.action ? `, ${n.action} action needed` : "");
+  }
+  const t = tally(inGroup);
+  for (const opt of $("show").options) {
+    if (opt.value === "all") { opt.textContent = `All \u2014 ${inGroup.length}`; continue; }
+    opt.textContent = `${opt.textContent.replace(/ \u2014 \d+$/, "")} \u2014 ${t[opt.value] || 0}`;
+  }
+  for (const opt of $("res").options) {
+    const n = opt.value === "all" ? inGroup.length : inGroup.filter((it) => resOf(it) === opt.value).length;
+    opt.textContent = `${RES_LABELS[opt.value]} \u2014 ${n}`;
+  }
+  for (const opt of $("up").options) {
+    const n = opt.value === "all" ? inGroup.length : inGroup.filter((it) => upscaleOf(it) === opt.value).length;
+    opt.textContent = `${UP_LABELS[opt.value]} \u2014 ${n}`;
+  }
+  const keep = inGroup.filter((it) => ["approved", "printable"].includes(statusOf(it)));
+  const rendered = keep.filter((it) => final[it.key] && !final[it.key].error).length;
+  const COL = { approved: "good-t", printable: "warn", delete: "bad-t", pending: "warn", action: "bad-t" };
+  const off = inGroup.filter((it) => it.live !== "ACTIVE").length;
+  $("counts").innerHTML = "<p>" + Object.entries(STATUS_LABELS).map(([s, label]) =>
+    `<span class="${COL[s]}">${t[s] || 0} ${label}</span>`).join("<br>") + "</p>" +
+    (off ? `<p class="bad-t"><b>${off} not on the store</b></p>` : "") +
+    (rendered < keep.length ? `<p class="warn" style="font-size:12px">${rendered} of ${keep.length} approved / printable wrong rendered so far</p>` : "");
+}
+
+function open() {
+  item = list[idx];
+  if (!item) {
+    $("title").textContent = "Nothing left here"; $("where").textContent = ""; $("pos").textContent = "";
+    for (const id of ["orig", "crop", "print"]) { const c = $(id); c.width = c.height = 0; }
+    for (const id of ["origInfo", "cropInfo", "printInfo", "history"]) $(id).textContent = "";
+    return;
+  }
+  const e = fb(item);
+  frac = (e.frac || planFrac()).slice();
+  const last = (e.history || []).slice(-1)[0];
+  $("history").innerHTML = last
+    ? `<b>Your last note</b> (round ${e.history.length}): \u201c${esc(last.note)}\u201d. Done: ${esc(last.done || "")}`
+    : "";
+  $("title").textContent = item.file.replace(/\.[^.]+$/, "");
+  $("live").textContent = item.live === "DRAFT" ? "DRAFT ON STORE \u2014 NOT LIVE" : "NOT ON STORE";
+  $("live").classList.toggle("hidden", item.live === "ACTIVE");
+  $("where").textContent = item.folder;
+  const left = list.filter(pendingNow).length;
+  $("pos").textContent = `${idx + 1} of ${list.length}` + (left ? ` \u00b7 ${left} pending` : "");
+  $("note").value = e.note || "";
+  $("regroup").value = edgeOf(item);
+  showStatus(e);
+  showUpscale();
+  const key = item.key, q = encodeURIComponent(key);
+  img = new Image();
+  img.onload = function () { if (this === img) draw(); };
+  img.src = "img?key=" + q;
+  fopt = fprint = pimg = pinfo = pLive = pLiveKey = null; pLoading = false;
+  // Clear the previous painting so its images never sit under this painting's title while loading.
+  for (const id of ["orig", "crop", "print"]) blank(id);
+  for (const id of ["origInfo", "cropInfo", "printInfo"]) $(id).textContent = "Loading\u2026";
+  resetZoom();
+  const row = final[key];
+  if (row && !row.error) {
+    const a = new Image(), b = new Image();
+    a.onload = () => { if (item && item.key === key) { fopt = a; draw(); } };
+    b.onload = () => { if (item && item.key === key) { fprint = b; draw(); } };
+    a.src = finalUrl("opt", key);
+    if (row.printable) b.src = finalUrl("print", key);
+  } else loadPrintable(key);
+  draw();
+  prefetch();
+}
+
+// The version changes with every re-render, so the browser never shows an older copy of a final file.
+function finalUrl(kind, key) {
+  return `final?kind=${kind}&key=${encodeURIComponent(key)}&v=${(final[key] && final[key].v) || ""}`;
+}
+
+function loadPrintable(key) {
+  if (pLoading) return;
+  pLoading = true;
+  fetch("api/printable?key=" + encodeURIComponent(key)).then((r) => r.json()).then((info) => {
+    if (!item || item.key !== key) return;
+    pinfo = info;
+    if (!info.exists) { draw(); return; }
+    const p = new Image();
+    p.onload = () => { if (item && item.key === key) { pimg = p; draw(); } };
+    p.src = "printable?key=" + encodeURIComponent(key);
+  }).catch((err) => { if (item && item.key === key) { pinfo = { error: String(err) }; draw(); } });
+}
+
+function prefetch() {
+  for (const it of list.slice(idx + 1, idx + 3)) {
+    if (final[it.key] && !final[it.key].error) {
+      new Image().src = finalUrl("opt", it.key);
+      new Image().src = finalUrl("print", it.key);
+    }
+  }
+}
+
+function showStatus(e) {
+  if (statusOf(item) === "action") {
+    $("status").textContent = "! action needed (your note)";
+    $("status").style.color = COLOURS.issue;
+    return;
+  }
+  const s = e.checked ? e.status : null;
+  const old = e.status === "border" ? "border problem from the crop review, never fixed" : e.status ? `was ${LABELS[e.status] || e.status}` : "";
+  $("status").textContent = s ? (LABELS[s] || s)
+    : e.revised ? "revised after your note \u2014 check again"
+    : UNDECIDED_GROUPS.includes(item.group) && e.status !== "delete" ? `pending review${old ? ` \u2014 ${old}` : ` \u2014 ${item.folder}`}`
+    : e.recheck && e.status ? `back for review \u2014 was ${LABELS[e.status] || e.status}`
+    : e.revised ? "revised \u2014 check again" : e.status === "approved" ? "not checked yet" : LABELS[e.status] || "";
+  $("status").style.color = s ? COLOURS[s] || "#ffd60a" : "#999";
+}
+
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function recipe() { return fb(item).recipe || {}; }
+function planFrac() { return recipe().frac || item.frac; }
+function target() { return recipe().target || item.target; }
+function rgb(c) { return c ? `rgb(${c[0]},${c[1]},${c[2]})` : "#fff"; }
+function largestInches() { const t = target(); return Math.abs(t - 16 / 9) < 0.05 || Math.abs(t - 9 / 16) < 0.05 ? 48 : 36; }
+function sameFrac(a, b) { return a && b && a.every((v, i) => Math.abs(v - b[i]) <= 1e-4); }
+
+// The rendered files are shown unless the crop has moved since they were rendered.
+function useFinal() {
+  const row = final[item.key];
+  return Boolean(row && !row.error && sameFrac(frac, row.frac || fb(item).frac || planFrac()));
+}
+
+function fit(c, source, maxW, maxH) {
+  const s = Math.min(maxH / source.height, maxW / source.width);
+  c.width = Math.round(source.width * s); c.height = Math.round(source.height * s);
+  c.style.width = c.style.height = "";
+  c.getContext("2d").drawImage(source, 0, 0, c.width, c.height);
+}
+
+// For "extend" recipes the padding repeats the image's outermost pixels, as the renderer does.
+// (x, y, w, h) is where the whole source is drawn on the context; box is the padded window in the same space.
+function drawExtended(ctx, source, x, y, w, h, box) {
+  const [bx0, by0, bx1, by1] = box, sw = source.width, sh = source.height;
+  if (bx0 < x) ctx.drawImage(source, 0, 0, 1, sh, bx0, y, x - bx0, h);
+  if (bx1 > x + w) ctx.drawImage(source, sw - 1, 0, 1, sh, x + w, y, bx1 - x - w, h);
+  if (by0 < y) ctx.drawImage(source, 0, 0, sw, 1, x, by0, w, y - by0);
+  if (by1 > y + h) ctx.drawImage(source, 0, sh - 1, sw, 1, x, y + h, w, by1 - y - h);
+}
+
+// Draws the cropped result of `source` (any size) into canvas `c`, fitted to maxW x maxH.
+// With sharp = true the canvas keeps the source's own resolution (capped) and is only shown at the fitted size,
+// so zooming in on the printable stays sharp.
+function drawCrop(c, source, maxW, maxH, sharp) {
+  const bx0 = frac[0] * source.width, by0 = frac[1] * source.height;
+  const bw = (frac[2] - frac[0]) * source.width, bh = (frac[3] - frac[1]) * source.height;
+  const fitted = Math.min(maxH / bh, maxW / bw);
+  const cs = sharp ? Math.min(1, Math.sqrt(40e6 / (bw * bh))) : fitted;
+  c.width = Math.round(bw * cs); c.height = Math.round(bh * cs);
+  c.style.width = sharp ? Math.round(bw * fitted) + "px" : "";
+  c.style.height = sharp ? Math.round(bh * fitted) + "px" : "";
+  const cx = c.getContext("2d");
+  cx.fillStyle = rgb(recipe().fill); cx.fillRect(0, 0, c.width, c.height);
+  cx.drawImage(source, -bx0 * cs, -by0 * cs, source.width * cs, source.height * cs);
+  if (recipe().extend) drawExtended(cx, source, -bx0 * cs, -by0 * cs, source.width * cs, source.height * cs, [0, 0, c.width, c.height]);
+  for (const [side, cov] of Object.entries(recipe().cover || {})) {
+    const n = Math.round(cov.size * (side === "top" || side === "bottom" ? c.height : c.width));
+    cx.fillStyle = rgb(cov.color);
+    if (side === "top") cx.fillRect(0, 0, c.width, n);
+    else if (side === "bottom") cx.fillRect(0, c.height - n, c.width, n);
+    else if (side === "left") cx.fillRect(0, 0, n, c.height);
+    else cx.fillRect(c.width - n, 0, n, c.height);
+  }
+}
+
+function blank(id) { const c = $(id); c.width = c.height = 0; c.style.width = c.style.height = ""; }
+
+function draw() {
+  if (!item) return;
+  // Room left for each image after the pane's label and a two-line info row, so nothing is clipped by the
+  // printable's zoom frame.
+  const panes = [...document.querySelectorAll(".pane")].filter((p) => p.offsetWidth);
+  const stageH = $("stage").clientHeight - 64, paneW = Math.min(...panes.map((p) => p.clientWidth)) - 4;
+  const showFinal = useFinal();
+  if (!showFinal) zoomFull(null);
+  $("cropLabel").textContent = showFinal ? "Final optimised" : "Optimised (live preview)";
+  $("printLabel").textContent = showFinal ? "Final printable" : "Printable (live preview)";
+  if (!img.width) return;
+  const o = $("orig");
+  const bx0 = frac[0] * img.width, by0 = frac[1] * img.height, bx1 = frac[2] * img.width, by1 = frac[3] * img.height;
+  // left view covers both the image and any padding the box reaches into
+  const ux0 = Math.min(0, bx0), uy0 = Math.min(0, by0), ux1 = Math.max(img.width, bx1), uy1 = Math.max(img.height, by1);
+  const s = Math.min(stageH / (uy1 - uy0), paneW / (ux1 - ux0));
+  o.width = Math.round((ux1 - ux0) * s); o.height = Math.round((uy1 - uy0) * s);
+  const ox = o.getContext("2d");
+  ox.fillStyle = "#555"; ox.fillRect(0, 0, o.width, o.height);
+  ox.fillStyle = rgb(recipe().fill);
+  ox.fillRect((bx0 - ux0) * s, (by0 - uy0) * s, (bx1 - bx0) * s, (by1 - by0) * s);
+  ox.drawImage(img, -ux0 * s, -uy0 * s, img.width * s, img.height * s);
+  const [x0, y0, x1, y1] = [(bx0 - ux0) * s, (by0 - uy0) * s, (bx1 - ux0) * s, (by1 - uy0) * s];
+  if (recipe().extend) drawExtended(ox, img, -ux0 * s, -uy0 * s, img.width * s, img.height * s, [x0, y0, x1, y1]);
+  ox.fillStyle = "rgba(0,0,0,0.65)";
+  ox.fillRect(0, 0, o.width, y0); ox.fillRect(0, y1, o.width, o.height - y1);
+  ox.fillRect(0, y0, x0, y1 - y0); ox.fillRect(x1, y0, o.width - x1, y1 - y0);
+  ox.strokeStyle = "#ff3b30"; ox.lineWidth = 2; ox.strokeRect(x0, y0, x1 - x0, y1 - y0);
+  $("origInfo").textContent = `${item.w} \u00d7 ${item.h} px`;
+  $("cropInfo").textContent = `${Math.round(bx1 - bx0)} \u00d7 ${Math.round(by1 - by0)} px`;
+
+  if (showFinal) {
+    if (fopt && showOpt) fit($("crop"), fopt, paneW, stageH); else blank("crop");
+    if (fprint) { fit($("print"), fprint, paneW, stageH); finalPrintInfo(); }
+    else { blank("print"); $("printInfo").textContent = final[item.key].printable ? "Loading\u2026" : "No printable file"; }
+    return;
+  }
+  if (showOpt) drawCrop($("crop"), img, paneW, stageH); else blank("crop");
+  if (!pimg && !pinfo) loadPrintable(item.key);
+  if (pimg) { drawCrop($("print"), pLive || pimg, paneW, stageH, Boolean(pLive)); livePrintInfo(); }
+  else {
+    blank("print");
+    $("printInfo").innerHTML = pinfo && !pinfo.exists ? `<span class="bad-t">${esc(pinfo.error || "No printable file")}</span>` : "Loading\u2026";
+  }
+}
+
+function sharpness(w, h) {
+  const inches = largestInches(), ppi = Math.round(Math.max(w, h) / inches);
+  const grade = ppi >= 150 ? ["high", "good-t"] : ppi >= 100 ? ["fair", "warn"] : ["low", "bad-t"];
+  return `<span class="${grade[1]}">${ppi} ppi at ${inches}" (${grade[0]})</span>`;
+}
+
+function finalPrintInfo() {
+  const row = final[item.key];
+  const [w, h] = row.printable_px;
+  const notes = [];
+  if (row.framing === "rotated") notes.push(`<span class="warn">printable was saved sideways, turned</span>`);
+  if (row.framing === "different") notes.push(`<span class="bad-t">printable framed differently from the optimised file</span>`);
+  if (row.clean_printable) notes.push(`<span class="warn">same edit applied to the printable</span>`);
+  $("printInfo").innerHTML = `${esc(row.name)} &middot; ${w} \u00d7 ${h} px &middot; ${sharpness(w, h)}` +
+    (notes.length ? "<br>" + notes.join(" &middot; ") : "");
+}
+
+function livePrintInfo() {
+  const w = (frac[2] - frac[0]) * pinfo.w, h = (frac[3] - frac[1]) * pinfo.h;
+  const notes = ["files update after re-render"];
+  if (recipe().clean) notes.push(`<span class="warn">text removal not shown in live preview</span>`);
+  $("printInfo").innerHTML = `${esc(pinfo.name)} &middot; ${Math.round(w)} \u00d7 ${Math.round(h)} px &middot; ${sharpness(w, h)}` +
+    "<br>" + notes.join(" &middot; ");
+}
+
+function move(dx, dy) {
+  const w = frac[2] - frac[0], h = frac[3] - frac[1];
+  const clamp = (v, cur, size) => Math.min(Math.max(v, Math.min(0, 1 - size, cur)), Math.max(0, 1 - size, cur));
+  const x0 = clamp(frac[0] + dx, frac[0], w), y0 = clamp(frac[1] + dy, frac[1], h);
+  frac = [x0, y0, x0 + w, y0 + h];
+  draw();
+}
+
+function moved() { const p = planFrac(); return frac.some((v, i) => Math.abs(v - p[i]) > 1e-4); }
+
+async function store(status) {
+  if (!item) return;
+  const prev = feedback[item.key] || {};
+  const entry = { ...prev, note: $("note").value.trim(), edge: regroupValue() };
+  if (status) { entry.status = status; entry.checked = true; }
+  // A comment means something still needs fixing, so it never counts as "both fine".
+  if (entry.note) {
+    entry.checked = true;
+    const undoDelete = !status && entry.status === "delete" && UNDECIDED_GROUPS.includes(item.group) && !deleteNote(entry.note);
+    if (!entry.status || undoDelete || ["approved", "border", "rejected"].includes(entry.status)) entry.status = "issue";
+  }
+  if (moved()) entry.frac = frac.map((v) => Math.round(v * 10000) / 10000); else delete entry.frac;
+  if (entry.edge === item.edge) delete entry.edge;
+  if (!entry.note) delete entry.note;
+  feedback[item.key] = entry;
+  const saved = await (await fetch("api/feedback", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: item.key, entry }) })).json().catch(() => ({}));
+  if (saved.entry) feedback[item.key] = saved.entry;
+  showStatus(feedback[item.key]); counts();
+}
+
+// Decided paintings stay in the list until the filter changes, so PgUp can go back and change a decision.
+// In "Pending review", a decision jumps ahead to the next painting still pending.
+async function decide(status) {
+  await store(status);
+  let next = idx + 1;
+  if ($("show").value === "pending") while (next < list.length && !pendingNow(list[next])) next++;
+  if (next < list.length) idx = next;
+  open();
+}
+
+// Upscale yes/no is only asked for paintings Topaz has never upscaled. It never changes the status.
+function showUpscale() {
+  const v = item ? upscaleOf(item) : "topaz";
+  $("upBox").classList.toggle("hidden", !item || v === "topaz");
+  $("upTopaz").classList.toggle("hidden", !item || v !== "topaz");
+  $("upYes").classList.toggle("on", v === "yes");
+  $("upNo").classList.toggle("on", v === "no");
+}
+async function markUpscale(value) {
+  if (!item || item.topaz) return;
+  if (dirty()) await store();
+  const entry = { ...(feedback[item.key] || {}) };
+  if (entry.upscale === value) delete entry.upscale; else entry.upscale = value;
+  feedback[item.key] = entry;
+  const saved = await (await fetch("api/feedback", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: item.key, entry }) })).json().catch(() => ({}));
+  if (saved.entry) feedback[item.key] = saved.entry;
+  counts();
+  if (feedback[item.key] && feedback[item.key].upscale && idx < list.length - 1) idx++;
+  open();
+}
+
+// Recently uploaded paintings have no painted-border/blank/edge group, so the dropdown is blank for them.
+function regroupValue() { return $("regroup").value || edgeOf(item); }
+
+function dirty() {
+  const e = fb(item);
+  return $("note").value.trim() !== (e.note || "") || regroupValue() !== edgeOf(item) || !sameFrac(frac, e.frac || planFrac());
+}
+
+async function go(step) {
+  if (item && dirty()) await store();
+  idx = Math.min(Math.max(0, idx + step), list.length - 1);
+  open();
+}
+function resetCrop() { frac = planFrac().slice(); draw(); }
+
+// Optimised column is hidden unless asked for; the choice is remembered in this browser.
+let showOpt = localStorage.getItem("finalCheckShowOpt") === "1";
+function applyOpt() {
+  $("cropPane").classList.toggle("hidden", !showOpt);
+  $("toggleOpt").textContent = showOpt ? "Hide optimised (O)" : "Show optimised (O)";
+}
+function toggleOpt() { showOpt = !showOpt; localStorage.setItem("finalCheckShowOpt", showOpt ? "1" : "0"); applyOpt(); draw(); }
+applyOpt();
+
+// Zoom on the printable is view-only. Past 1.5x the full-size final printable is loaded for a true look.
+let zoom = { s: 1, x: 0, y: 0 }, fullKey = null, drag = null;
+function applyZoom() {
+  const w = $("pwrap").clientWidth, h = $("pwrap").clientHeight;
+  zoom.x = Math.min(0, Math.max(w - w * zoom.s, zoom.x));
+  zoom.y = Math.min(0, Math.max(h - h * zoom.s, zoom.y));
+  $("pzoom").style.transform = `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.s})`;
+  $("pwrap").classList.toggle("zoomed", zoom.s > 1);
+  $("zoomTag").classList.toggle("hidden", zoom.s === 1);
+  $("zoomTag").textContent = `${Math.round(zoom.s * 100)}%` + (zoom.s > 1.5 && !$("pfull").complete ? " loading full size\u2026" : "");
+  if (zoom.s > 1.5 && item && useFinal()) zoomFull(item.key);
+  else if (zoom.s > 1.5 && item && pinfo && pinfo.exists) liveFull(item.key);
+}
+// Paintings without a final render zoom on the full-size printable instead of the small preview.
+function liveFull(key) {
+  if (pLive || pLiveKey === key) return;
+  pLiveKey = key;
+  const p = new Image();
+  p.onload = () => { if (item && item.key === key) { pLive = p; draw(); applyZoom(); } };
+  p.src = "printable?full=1&key=" + encodeURIComponent(key);
+}
+function zoomFull(key) {
+  const full = $("pfull");
+  if (!key) { if (fullKey) { full.removeAttribute("src"); full.style.display = "none"; fullKey = null; } return; }
+  if (fullKey === key || !final[key] || !final[key].printable) return;
+  fullKey = key;
+  full.style.display = "none";
+  full.onload = () => { if (fullKey === key) { full.style.display = "block"; applyZoom(); } };
+  full.src = finalUrl("full", key);
+}
+function resetZoom() { zoom = { s: 1, x: 0, y: 0 }; zoomFull(null); applyZoom(); }
+$("pwrap").addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const r = $("pwrap").getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  const s = Math.min(16, Math.max(1, zoom.s * (e.deltaY < 0 ? 1.25 : 0.8)));
+  zoom.x = mx - (mx - zoom.x) * (s / zoom.s);
+  zoom.y = my - (my - zoom.y) * (s / zoom.s);
+  zoom.s = s;
+  applyZoom();
+}, { passive: false });
+$("pwrap").addEventListener("mousedown", (e) => {
+  if (zoom.s === 1) return;
+  drag = { x: e.clientX - zoom.x, y: e.clientY - zoom.y };
+  $("pwrap").classList.add("dragging");
+  e.preventDefault();
+});
+window.addEventListener("mousemove", (e) => { if (drag) { zoom.x = e.clientX - drag.x; zoom.y = e.clientY - drag.y; applyZoom(); } });
+window.addEventListener("mouseup", () => { drag = null; $("pwrap").classList.remove("dragging"); });
+$("pwrap").addEventListener("dblclick", resetZoom);
+
+// Speech to text (Edge and Chrome).
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, listening = false;
+if (SR) {
+  rec = new SR(); rec.lang = "en-IN"; rec.continuous = true; rec.interimResults = false;
+  rec.onresult = (e) => {
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) {
+        const t = e.results[i][0].transcript.trim();
+        $("note").value = ($("note").value ? $("note").value + " " : "") + t;
+      }
+    }
+    store();
+  };
+  rec.onend = () => { if (listening) rec.start(); };
+} else { $("mic").title = "Speech needs Edge or Chrome"; }
+function micOn() { if (!rec || listening) return; listening = true; rec.start(); $("mic").classList.add("live"); }
+function micOff() { if (!rec || !listening) return; listening = false; rec.stop(); $("mic").classList.remove("live"); }
+
+$("mic").onclick = () => (listening ? micOff() : micOn());
+$("approve").onclick = () => decide("approved");
+$("cropOnly").onclick = () => decide("crop_only");
+$("del").onclick = () => decide("delete");
+$("reset").onclick = resetCrop;
+$("toggleOpt").onclick = () => { $("toggleOpt").blur(); toggleOpt(); };
+$("prev").onclick = () => go(-1);
+$("next").onclick = () => go(1);
+// A typed note is saved before the list changes, so switching filters never loses it.
+async function refilter(id) { $(id).blur(); if (item && dirty()) await store(); rebuild(); }
+$("group").onchange = () => refilter("group");
+$("show").onchange = () => refilter("show");
+$("res").onchange = () => refilter("res");
+$("up").onchange = () => refilter("up");
+$("upYes").onclick = () => { $("upYes").blur(); markUpscale("yes"); };
+$("upNo").onclick = () => { $("upNo").blur(); markUpscale("no"); };
+window.addEventListener("pagehide", () => {
+  const note = item ? $("note").value.trim() : "";
+  if (!note || note === (fb(item).note || "")) return;
+  const entry = { ...(feedback[item.key] || {}), note, checked: true };
+  const undoDelete = entry.status === "delete" && UNDECIDED_GROUPS.includes(item.group) && !deleteNote(note);
+  if (!entry.status || undoDelete || ["approved", "border", "rejected"].includes(entry.status)) entry.status = "issue";
+  navigator.sendBeacon("api/feedback", new Blob([JSON.stringify({ key: item.key, entry })], { type: "application/json" }));
+});
+$("regroup").onchange = () => { $("regroup").blur(); store(); };
+$("note").addEventListener("blur", () => { if (item && dirty()) store(); });
+async function submitNote() {
+  if (!item) return;
+  $("note").blur();
+  if (dirty()) await store();
+  const e = fb(item);
+  $("noteSaved").textContent = (e.note || "").trim() ? `Note saved \u2014 ${item.file.replace(/\.[^.]+$/, "")} is now in action needed` : "No note to submit";
+  setTimeout(() => { $("noteSaved").textContent = ""; }, 4000);
+}
+$("submitNote").onclick = submitNote;
+window.addEventListener("resize", draw);
+
+// Numpad works with Num Lock on or off: 4/6/8/2 move, 3 = PgDn, 9 = PgUp.
+const MOVES = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
+  Numpad4: [-1, 0], Numpad6: [1, 0], Numpad8: [0, -1], Numpad2: [0, 1] };
+document.addEventListener("keydown", (e) => {
+  if (document.activeElement === $("note")) {
+    if (e.key === "Escape") $("note").blur();
+    else if (e.key === "Enter" && e.ctrlKey) { e.preventDefault(); submitNote(); }
+    return;
+  }
+  if (e.target.tagName === "SELECT") return;
+  const step = e.shiftKey ? 0.03 : 0.005;
+  const mv = MOVES[e.code] || MOVES[e.key];
+  if (mv) { move(mv[0] * step, mv[1] * step); e.preventDefault(); return; }
+  const k = e.key;
+  if (k === "Enter") { decide("approved"); e.preventDefault(); }
+  else if (k === "+" || e.code === "NumpadAdd") { decide("crop_only"); e.preventDefault(); }
+  else if (k === "PageDown" || k === "3" || e.code === "Numpad3") { go(1); e.preventDefault(); }
+  else if (k === "PageUp" || k === "9" || e.code === "Numpad9") { go(-1); e.preventDefault(); }
+  else if (k === "Delete" || k === "d" || k === "D" || e.code === "NumpadDecimal") { decide("delete"); e.preventDefault(); }
+  else if (k === "c" || k === "C") resetCrop();
+  else if (k === "o" || k === "O") toggleOpt();
+  else if (k === "y" || k === "Y") { markUpscale("yes"); e.preventDefault(); }
+  else if (k === "n" || k === "N") { markUpscale("no"); e.preventDefault(); }
+  else if (k === " " && !e.repeat) { micOn(); e.preventDefault(); }
+});
+document.addEventListener("keyup", (e) => { if (e.key === " " && document.activeElement !== $("note")) micOff(); });
+
+load();
+</script>
+</body>
+</html>

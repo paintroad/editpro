@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Printables</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, sans-serif; background: #1d1d1f; color: #eee; display: flex; height: 100vh; }
+  #side { width: 250px; padding: 12px; border-right: 1px solid #333; overflow: auto; flex-shrink: 0; }
+  #main { flex: 1; display: flex; flex-direction: column; padding: 10px 14px; min-width: 0; }
+  h1 { font-size: 22px; margin: 0 0 8px; }
+  .muted { color: #999; }
+  button, textarea { font: inherit; }
+  button { padding: 5px 11px; border-radius: 6px; border: 1px solid #555; background: #2c2c2e; color: #eee; cursor: pointer; }
+  button.on { background: #0a64d6; border-color: #0a64d6; }
+  .item { padding: 6px 8px; border-radius: 6px; cursor: pointer; margin-bottom: 4px; border: 1px solid transparent; }
+  .item:hover { background: #2a2a2c; }
+  .item.sel { background: #2c2c2e; border-color: #0a64d6; }
+  .item .sub { font-size: 12px; color: #999; }
+  .item .pick { font-size: 12px; color: #30d158; }
+  #bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  #bar label { display: inline-flex; gap: 4px; align-items: center; color: #ccc; font-size: 13px; }
+  #zoomTag { min-width: 160px; color: #ccc; }
+  #grid { flex: 1; display: grid; gap: 8px; min-height: 0; }
+  .pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border: 2px solid transparent; border-radius: 6px; }
+  .pane.best { border-color: #30d158; }
+  .pane .head { display: flex; justify-content: space-between; gap: 6px; align-items: baseline; padding: 2px 4px; }
+  .pane .name { font-weight: 600; }
+  .pane .info { font-size: 12px; color: #aaa; text-align: right; }
+  .view { position: relative; flex: 1; overflow: hidden; background: #000; cursor: grab; min-height: 0; }
+  .view.dragging { cursor: grabbing; }
+  .view img { position: absolute; left: 0; top: 0; transform-origin: 0 0; user-select: none; -webkit-user-drag: none; max-width: none; }
+  .pixel .view img { image-rendering: pixelated; }
+  .view .loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #777; }
+  .pane .foot { display: flex; gap: 6px; padding: 4px; }
+  .pane .foot button { font-size: 12px; padding: 3px 8px; }
+  .pane .foot button.bestbtn.on { background: #1f7a3a; border-color: #1f7a3a; }
+  textarea { width: 100%; height: 56px; background: #111; color: #eee; border: 1px solid #444; border-radius: 6px; padding: 6px; margin-top: 6px; }
+  #panes label { display: block; font-size: 13px; color: #ccc; }
+  #help p { margin: 3px 0; font-size: 12px; }
+  kbd { background: #333; border-radius: 4px; padding: 0 5px; font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="side">
+  <h1>Printables</h1>
+  <div class="muted" style="margin-bottom:8px">Model trials. Every pane shows the same spot of the painting.</div>
+  <div id="list"></div>
+  <div class="muted" style="margin-top:12px">Show panes</div>
+  <div id="panes"></div>
+  <div class="muted" style="margin-top:12px">Note</div>
+  <textarea id="note" placeholder="What you see, e.g. 'High Fidelity keeps the gold lines; Recover invents faces'"></textarea>
+  <button id="saveNote" style="margin-top:6px">Save note</button>
+  <div id="help" class="muted" style="margin-top:12px">
+    <p>Scroll to zoom, drag to move. All panes follow.</p>
+    <p><kbd>0</kbd> fit · <kbd>1</kbd> print pixels (150 ppi) · <kbd>2</kbd> 2×</p>
+    <p><kbd>↑</kbd><kbd>↓</kbd> painting · <kbd>P</kbd> show pixels</p>
+  </div>
+</div>
+<div id="main">
+  <div id="bar">
+    <button data-zoom="fit">Fit</button>
+    <button data-zoom="1">Print pixels</button>
+    <button data-zoom="2">2×</button>
+    <label><input type="checkbox" id="pixel"> Show pixels</label>
+    <span id="zoomTag"></span>
+    <span id="title" class="muted"></span>
+  </div>
+  <div id="grid"></div>
+</div>
+<script>
+const state = { items: [], feedback: {}, idx: 0, hidden: new Set(), z: 1, cx: 0.5, cy: 0.5 };
+const grid = document.getElementById("grid");
+let panes = [];
+
+const MAX_IN = (w, h) => (Math.abs(w / h - 16 / 9) < 0.05 || Math.abs(w / h - 9 / 16) < 0.05 ? 48 : 36);
+
+async function load() {
+  const r = await fetch("api/items", { cache: "no-store" });
+  const data = await r.json();
+  state.items = data.items || [];
+  state.feedback = data.feedback || {};
+  renderList();
+  if (state.items.length) select(0);
+  else grid.innerHTML = '<div class="muted">No trials yet. Run printable_trials.py.</div>';
+}
+
+function paneDefs(item) {
+  const defs = [{ id: "input", name: "Original", info: `${item.input_px[0]}×${item.input_px[1]} · ${item.base} · plain enlargement`, px: item.input_px }];
+  if (item.current) defs.push({ id: "current", name: "Current printable", info: "the file used today" });
+  for (const run of item.runs) {
+    defs.push({ id: run.id, name: run.model, px: run.px,
+      info: `${run.px[0]}×${run.px[1]} · ${run.scale}× · ${run.credits} credit${run.credits === 1 ? "" : "s"} · ${run.seconds}s` });
+  }
+  return defs;
+}
+
+function renderList() {
+  const list = document.getElementById("list");
+  list.innerHTML = "";
+  state.items.forEach((item, i) => {
+    const fb = state.feedback[item.key] || {};
+    const div = document.createElement("div");
+    div.className = "item" + (i === state.idx ? " sel" : "");
+    const models = item.runs.map((r) => r.model).join(", ");
+    const pick = fb.pick ? paneDefs(item).find((d) => d.id === fb.pick)?.name : "";
+    div.innerHTML = `<div>${item.key}</div><div class="sub">${models}</div>${pick ? `<div class="pick">Best: ${pick}</div>` : ""}`;
+    div.onclick = () => select(i);
+    list.appendChild(div);
+  });
+}
+
+function select(i) {
+  state.idx = i;
+  state.z = 1; state.cx = 0.5; state.cy = 0.5;
+  const item = state.items[i];
+  document.getElementById("note").value = (state.feedback[item.key] || {}).note || "";
+  document.getElementById("title").textContent = `${item.key} · target ${item.target ? (item.target >= 1 ? item.target.toFixed(2) : "1:" + (1 / item.target).toFixed(2)) : ""}`;
+  renderList();
+  buildPanes();
+}
+
+function buildPanes() {
+  const item = state.items[state.idx];
+  const defs = paneDefs(item);
+  const box = document.getElementById("panes");
+  box.innerHTML = "";
+  for (const d of defs) {
+    const l = document.createElement("label");
+    l.innerHTML = `<input type="checkbox" ${state.hidden.has(d.id) ? "" : "checked"}> ${d.name}`;
+    l.querySelector("input").onchange = (e) => { e.target.checked ? state.hidden.delete(d.id) : state.hidden.add(d.id); buildPanes(); };
+    box.appendChild(l);
+  }
+  const shown = defs.filter((d) => !state.hidden.has(d.id));
+  const cols = shown.length <= 3 ? shown.length : Math.ceil(shown.length / 2);
+  grid.style.gridTemplateColumns = `repeat(${Math.max(1, cols)}, minmax(0, 1fr))`;
+  grid.style.gridTemplateRows = shown.length > 3 ? "repeat(2, minmax(0, 1fr))" : "minmax(0, 1fr)";
+  grid.innerHTML = "";
+  const pick = (state.feedback[item.key] || {}).pick;
+  panes = shown.map((d) => {
+    const el = document.createElement("div");
+    el.className = "pane" + (pick === d.id ? " best" : "");
+    el.innerHTML = `<div class="head"><span class="name">${d.name}</span><span class="info">${d.info}</span></div>
+      <div class="view"><div class="loading">Loading…</div><img alt=""></div>
+      <div class="foot"><button class="bestbtn${pick === d.id ? " on" : ""}">${pick === d.id ? "Best ✓" : "Mark best"}</button></div>`;
+    grid.appendChild(el);
+    const img = el.querySelector("img");
+    const view = el.querySelector(".view");
+    const pane = { def: d, el, img, view, w: 0, h: 0 };
+    img.onload = () => {
+      pane.w = img.naturalWidth; pane.h = img.naturalHeight;
+      el.querySelector(".loading").remove();
+      if (d.id === "current") el.querySelector(".info").textContent = `${pane.w}×${pane.h} · ${Math.round(Math.max(pane.w, pane.h) / MAX_IN(pane.w, pane.h))} ppi at largest size`;
+      apply();
+    };
+    img.src = `img?key=${encodeURIComponent(item.key)}&pane=${encodeURIComponent(d.id)}`;
+    el.querySelector(".bestbtn").onclick = () => saveFeedback({ pick: pick === d.id ? null : d.id });
+    attach(pane);
+    return pane;
+  });
+  apply();
+}
+
+// One shared view: zoom z (1 = whole painting fits) and the painting point (cx, cy, 0..1) at the pane centre.
+function layout(pane) {
+  const W = pane.view.clientWidth, H = pane.view.clientHeight;
+  const fit = Math.min(W / pane.w, H / pane.h);
+  const dw = pane.w * fit * state.z, dh = pane.h * fit * state.z;
+  return { W, H, dw, dh, left: W / 2 - state.cx * dw, top: H / 2 - state.cy * dh };
+}
+
+function clampCentre() {
+  const p = panes.find((x) => x.w);
+  if (!p) return;
+  const { W, H, dw, dh } = layout(p);
+  const hx = Math.min(0.5, W / 2 / dw), hy = Math.min(0.5, H / 2 / dh);
+  state.cx = Math.min(1 - hx, Math.max(hx, state.cx));
+  state.cy = Math.min(1 - hy, Math.max(hy, state.cy));
+}
+
+function apply() {
+  clampCentre();
+  for (const p of panes) {
+    if (!p.w) continue;
+    const { dw, left, top } = layout(p);
+    const s = dw / p.w;
+    p.img.style.width = p.w + "px";
+    p.img.style.transform = `translate(${left}px, ${top}px) scale(${s})`;
+  }
+  const big = panes.filter((p) => p.w && p.def.id !== "input").sort((a, b) => b.w - a.w)[0] || panes.find((p) => p.w);
+  if (big) {
+    const s = layout(big).dw / big.w;
+    document.getElementById("zoomTag").textContent = `Zoom ${Math.round(s * 100)}% of print pixels`;
+  }
+}
+
+function zoomAbout(pane, mx, my, factor) {
+  if (!pane.w) return;
+  const before = layout(pane);
+  const px = (mx - before.left) / before.dw, py = (my - before.top) / before.dh;
+  state.z = Math.min(400, Math.max(1, state.z * factor));
+  const after = layout(pane);
+  state.cx = (after.W / 2 - (mx - px * after.dw)) / after.dw;
+  state.cy = (after.H / 2 - (my - py * after.dh)) / after.dh;
+  apply();
+}
+
+function attach(pane) {
+  pane.view.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const r = pane.view.getBoundingClientRect();
+    zoomAbout(pane, e.clientX - r.left, e.clientY - r.top, Math.exp(-e.deltaY * 0.0015));
+  }, { passive: false });
+  pane.view.addEventListener("mousedown", (e) => {
+    if (!pane.w) return;
+    e.preventDefault();
+    pane.view.classList.add("dragging");
+    let x = e.clientX, y = e.clientY;
+    const move = (ev) => {
+      const { dw, dh } = layout(pane);
+      state.cx -= (ev.clientX - x) / dw; state.cy -= (ev.clientY - y) / dh;
+      x = ev.clientX; y = ev.clientY;
+      apply();
+    };
+    const up = () => { pane.view.classList.remove("dragging"); window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  });
+  pane.view.addEventListener("dblclick", (e) => {
+    const r = pane.view.getBoundingClientRect();
+    if (state.z > 1.01) { state.z = 1; state.cx = state.cy = 0.5; apply(); return; }
+    const big = panes.filter((p) => p.w && p.def.id !== "input").sort((a, b) => b.w - a.w)[0] || pane;
+    const target = 1 / (layout(big).dw / big.w / state.z);
+    zoomAbout(pane, e.clientX - r.left, e.clientY - r.top, target / state.z);
+  });
+}
+
+// Zoom where 1 output pixel = 1 screen pixel (times k), keeping the current centre.
+function zoomPrint(k) {
+  const big = panes.filter((p) => p.w && p.def.id !== "input").sort((a, b) => b.w - a.w)[0];
+  if (!big) return;
+  state.z = 1;
+  const fit = layout(big).dw / big.w;
+  state.z = Math.max(1, k / fit);
+  apply();
+}
+
+async function saveFeedback(change) {
+  const item = state.items[state.idx];
+  const entry = { ...(state.feedback[item.key] || {}), ...change };
+  if (!entry.pick) delete entry.pick;
+  const r = await fetch("api/feedback", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: item.key, entry }) });
+  const data = await r.json();
+  if (data.ok) state.feedback[item.key] = data.entry;
+  const z = state.z, cx = state.cx, cy = state.cy;
+  renderList();
+  panes.forEach((p) => {
+    const isBest = state.feedback[item.key]?.pick === p.def.id;
+    p.el.classList.toggle("best", isBest);
+    const b = p.el.querySelector(".bestbtn");
+    b.classList.toggle("on", isBest);
+    b.textContent = isBest ? "Best ✓" : "Mark best";
+    b.onclick = () => saveFeedback({ pick: isBest ? null : p.def.id });
+  });
+  Object.assign(state, { z, cx, cy });
+}
+
+document.querySelectorAll("[data-zoom]").forEach((b) => {
+  b.onclick = () => (b.dataset.zoom === "fit" ? (state.z = 1, state.cx = state.cy = 0.5, apply()) : zoomPrint(Number(b.dataset.zoom)));
+});
+document.getElementById("pixel").onchange = (e) => document.body.classList.toggle("pixel", e.target.checked);
+document.getElementById("saveNote").onclick = () => saveFeedback({ note: document.getElementById("note").value.trim() });
+window.addEventListener("resize", apply);
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "TEXTAREA") return;
+  if (e.key === "ArrowDown" && state.idx < state.items.length - 1) { e.preventDefault(); select(state.idx + 1); }
+  else if (e.key === "ArrowUp" && state.idx > 0) { e.preventDefault(); select(state.idx - 1); }
+  else if (e.key === "0") { state.z = 1; state.cx = state.cy = 0.5; apply(); }
+  else if (e.key === "1") zoomPrint(1);
+  else if (e.key === "2") zoomPrint(2);
+  else if (e.key === "p" || e.key === "P") { const c = document.getElementById("pixel"); c.checked = !c.checked; c.onchange({ target: c }); }
+});
+load();
+</script>
+</body>
+</html>

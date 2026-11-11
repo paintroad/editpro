@@ -125,6 +125,7 @@ const {
   uploadCutouts,
 } = require("./lib/index-cutout");
 const artworkPipeline = require("./lib/artwork-pipeline");
+const { createReviewRouter } = require("./lib/review-routes");
 
 const app = express();
 const PORT = process.env.PORT || 3847;
@@ -1459,6 +1460,7 @@ router.post("/api/sale/revert", async (req, res) => {
   }
 });
 
+router.use(createReviewRouter());
 router.use(express.static(PUBLIC_DIR));
 router.get("/", (_req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, "index.html"));

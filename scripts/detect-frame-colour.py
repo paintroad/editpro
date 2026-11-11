@@ -22,7 +22,7 @@ import numpy as np
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 QUADS_PATH = os.path.join(SCRIPTS_DIR, "frame-quads.json")
-DEFAULT_FRAMES_ROOT = r"C:\Users\divya\Downloads\_Frame References"
+DEFAULT_FRAMES_ROOT = r"C:\Users\divya\Downloads\_Frames"
 
 COLOURS = ("Black", "White", "Wooden")
 

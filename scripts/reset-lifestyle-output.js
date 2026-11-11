@@ -3,7 +3,7 @@
  * Reset lifestyle output folders and catalog state.
  *
  * Frame reference note:
- * - Grey frames (_Frame References) are required at runtime for compositing.
+ * - Grey frames (_Frames) are required at runtime for compositing.
  * - Green quad refs (_Frame_References_Quads) are calibration-only; quads live in frame-quads.json.
  *
  * Usage:

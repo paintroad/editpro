@@ -11,7 +11,7 @@ const { loadSettings } = require("../../lib/catalog-pipeline");
 const { newSetsDir } = require("./paths");
 
 const QUADS = path.join(__dirname, "..", "frame-quads.json");
-const BASE_SOURCE = { portrait: "Portrait", landscape: "Landscape", square: "Square" };
+const BASE_SOURCE = { portrait: "Portrait", landscape: "Landscape", square: "Square", wide: null, tall: null };
 
 function fitFrame(orientation, src, dst) {
   const out = execFileSync("python", [path.join(__dirname, "fit_frame.py"), orientation, src, dst], { encoding: "utf8" });
@@ -19,7 +19,7 @@ function fitFrame(orientation, src, dst) {
 }
 
 const [setName, orientation, ...rooms] = process.argv.slice(2);
-if (!setName || !BASE_SOURCE[orientation] || !rooms.length) {
+if (!setName || !(orientation in BASE_SOURCE) || !rooms.length) {
   console.error('usage: build_set.js <setFolderName> <orientation> "<Room Label>=<image>" ...');
   process.exit(1);
 }
@@ -38,9 +38,12 @@ fs.mkdirSync(staging, { recursive: true });
 const quads = JSON.parse(fs.readFileSync(QUADS, "utf8"));
 const entries = {};
 const shape = orientation[0].toUpperCase() + orientation.slice(1);
-const baseName = `1. Base ${shape} Black.png`;
-fs.copyFileSync(path.join(root, BASE_SOURCE[orientation], baseName), path.join(staging, baseName));
-entries[baseName] = quads.quads[BASE_SOURCE[orientation]][baseName];
+// 16:9 (wide) and 9:16 (tall) have no base template; make_base_frames.py draws theirs after install.
+if (BASE_SOURCE[orientation]) {
+  const baseName = `1. Base ${shape} Black.png`;
+  fs.copyFileSync(path.join(root, BASE_SOURCE[orientation], baseName), path.join(staging, baseName));
+  entries[baseName] = quads.quads[BASE_SOURCE[orientation]][baseName];
+}
 
 let failed = false;
 rooms.forEach((spec, i) => {
@@ -108,4 +111,7 @@ fs.cpSync(staging, dir, { recursive: true });
 fs.rmSync(staging, { recursive: true, force: true });
 quads.quads[setName] = entries;
 fs.writeFileSync(QUADS, JSON.stringify(quads, null, 2) + "\n");
+// The index image shows the painting end to end in the black base frame.
+if (BASE_SOURCE[orientation]) execFileSync("python", [path.join(__dirname, "fill_base_frames.py"), dir], { stdio: "inherit" });
+else execFileSync("python", [path.join(__dirname, "make_base_frames.py"), orientation, dir], { stdio: "inherit" });
 console.log("installed", dir);

@@ -16,11 +16,11 @@ const { loadConfig } = require("../../lib/config-store");
 const { shopifyGraphql } = require("../../lib/shopify-client");
 const { assertClean } = require("../../lib/brand-guard");
 
-const OUT_DIR = process.argv[2] || path.join(os.homedir(), "Downloads");
 // The redesign agent reads the handover from the user's personal agent store.
 const HANDOVER_DIR =
   process.env.EDITPRO_HANDOVER_DIR ||
   path.join(os.homedir(), "AppData", "Local", "Cursor", "AgentStores", "cursor_agent_stores", "u368051301", "files", "handover");
+const OUT_DIR = process.argv[2] || HANDOVER_DIR;
 const MIN_NEW = 12;
 const MENU = { "Art form": "Indian Art > Art Forms", Subject: "Indian Art > Gods & Stories", Motif: "Indian Art > Motifs", Use: "Indian Art > Vastu", Contemporary: "Styles" };
 
@@ -173,7 +173,7 @@ async function liveCollections() {
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(collectionRows), "Collections");
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(paintingRows), "Paintings");
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(notes), "Notes");
-  const xlsxPath = path.join(OUT_DIR, "Paint Road - New Collections.xlsx");
+  const xlsxPath = path.join(OUT_DIR, "paintroad-new-collections.xlsx");
   XLSX.writeFile(workbook, xlsxPath);
 
   const create = plan.filter((item) => item.status === "Create");
@@ -183,7 +183,7 @@ async function liveCollections() {
   const brief = [
     "# Paint Road: new collections for the Indian art catalog",
     "",
-    `Generated ${new Date().toISOString().slice(0, 10)} from the EditPro Pipeline catalog (${rows.length} paintings). Full detail, descriptions and per-product tags are in \`Paint Road - New Collections.xlsx\`.`,
+    `Generated ${new Date().toISOString().slice(0, 10)} from the EditPro Pipeline catalog (${rows.length} paintings). Full detail, descriptions and per-product tags are in \`paintroad-new-collections.xlsx\`.`,
     "",
     "Every product published by the Pipeline already carries these tags, so each collection is a smart collection with one rule: product tag equals the tag shown.",
     "Create them after the upload finishes. Never mention competitor brands anywhere on the site.",
@@ -210,15 +210,10 @@ async function liveCollections() {
     "",
   ].join("\n");
   assertClean(brief, "collections brief");
-  const briefPath = path.join(OUT_DIR, "Paint Road - New Collections brief.md");
+  const briefPath = path.join(OUT_DIR, "paintroad-new-collections.md");
   fs.writeFileSync(briefPath, brief);
   console.log(xlsxPath);
   console.log(briefPath);
-  if (fs.existsSync(HANDOVER_DIR)) {
-    fs.copyFileSync(xlsxPath, path.join(HANDOVER_DIR, "paintroad-new-collections.xlsx"));
-    fs.copyFileSync(briefPath, path.join(HANDOVER_DIR, "paintroad-new-collections.md"));
-    console.log(`Handover updated in ${HANDOVER_DIR}`);
-  }
   console.log(`Create ${create.length}, grow ${grow.length}, hold ${hold.length}`);
 })().catch((error) => {
   console.error(error.message);

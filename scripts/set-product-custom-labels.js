@@ -18,6 +18,7 @@ const {
   loadLabelCollections,
   matchesCollection,
   productLabels,
+  frameLabel,
   priceBand,
 } = require("../lib/google-custom-labels");
 
@@ -236,11 +237,10 @@ async function main() {
   }
 
   const label0Counts = {};
-  const styleMembership = {};
-  const styleAssigned = {};
   const artAssigned = {};
   const subjectMembership = {};
   const subjectAssigned = {};
+  const frameCounts = {};
   const bandCounts = {};
   const sets = [];
   const deletes = [];
@@ -258,12 +258,8 @@ async function main() {
       collections
     );
     bump(label0Counts, desired[0] || "(empty)");
-    bump(styleAssigned, desired[1] || "(empty)");
+    bump(subjectAssigned, desired[1] || "(empty)");
     bump(artAssigned, desired[2] || "(empty)");
-    bump(subjectAssigned, desired[3] || "(empty)");
-    for (const collection of collections.styles) {
-      if (matchesCollection(tags, artistGid, collection)) bump(styleMembership, collection.title);
-    }
     for (const collection of collections.subjects) {
       if (matchesCollection(tags, artistGid, collection)) bump(subjectMembership, collection.title);
     }
@@ -287,21 +283,23 @@ async function main() {
 
     for (const variant of product.variants) {
       activeVariants += 1;
-      const band = priceBand(variant);
-      bump(bandCounts, band || "(empty)");
       VARIANT_LABEL_KEYS.forEach((key, index) => {
         if (String(variant[`label${index}`]?.value || "")) {
           deletes.push({ ownerId: variant.id, namespace: NAMESPACE, key });
         }
       });
-      if (!band || band === String(variant.label4?.value || "")) continue;
-      sets.push({
-        ownerId: variant.id,
-        namespace: NAMESPACE,
-        key: "custom_label_4",
-        type: METAFIELD_TYPE,
-        value: band,
-      });
+      const wanted = { 3: frameLabel(variant), 4: priceBand(variant) };
+      bump(frameCounts, wanted[3] || "(empty)");
+      bump(bandCounts, wanted[4] || "(empty)");
+      for (const [index, value] of Object.entries(wanted)) {
+        const current = String(variant[`label${index}`]?.value || "");
+        if (value === current) continue;
+        if (value) {
+          sets.push({ ownerId: variant.id, namespace: NAMESPACE, key: `custom_label_${index}`, type: METAFIELD_TYPE, value });
+        } else if (current) {
+          deletes.push({ ownerId: variant.id, namespace: NAMESPACE, key: `custom_label_${index}` });
+        }
+      }
     }
   }
 
@@ -309,11 +307,10 @@ async function main() {
     activeProducts,
     activeVariants,
     label0Counts,
-    styleMembership,
-    styleAssigned,
-    artAssigned,
     subjectMembership,
     subjectAssigned,
+    artAssigned,
+    frameCounts,
     bandCounts,
     sets: sets.length,
     deletes: deletes.length,

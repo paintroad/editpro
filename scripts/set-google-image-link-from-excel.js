@@ -130,18 +130,6 @@ async function findProductBySkuPrefix(storeDomain, accessToken, skuId) {
     }
   }
 
-  const first = nodes[0];
-  if (first?.product?.id && String(first.sku || "").startsWith(exactPrefix)) {
-    return {
-      skuId,
-      productId: first.product.id,
-      title: first.product.title || "",
-      handle: first.product.handle || "",
-      status: first.product.status || "",
-      sampleSku: first.sku || "",
-    };
-  }
-
   return null;
 }
 

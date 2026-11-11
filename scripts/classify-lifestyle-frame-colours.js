@@ -20,7 +20,7 @@ const GENERATED_ROOT =
   process.env.EDITPRO_GENERATED_CATALOG ||
   "C:\\Users\\divya\\Downloads\\_Generated Catalog Images";
 const FRAMES_ROOT =
-  process.env.EDITPRO_FRAME_REFERENCES || "C:\\Users\\divya\\Downloads\\_Frame References";
+  process.env.EDITPRO_FRAME_REFERENCES || "C:\\Users\\divya\\Downloads\\_Frames";
 
 function parseArgs(argv) {
   let limit = null;

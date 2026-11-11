@@ -701,6 +701,45 @@ body {
   display: none !important;
 }
 
+.module-panel.review-module {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+  height: 100vh;
+}
+
+.review-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.review-module-title {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.review-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+#reviewOpenTab {
+  margin-left: auto;
+}
+
+.review-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  background: #1d1d1f;
+}
+
 .modal {
   position: fixed;
   inset: 0;

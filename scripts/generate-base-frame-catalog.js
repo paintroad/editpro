@@ -23,7 +23,7 @@ const {
 const PAINTINGS_ROOT =
   process.env.EDITPRO_LIVE_PAINTINGS || "C:\\Paintroad\\Files\\Print_Optimised_Live";
 const FRAMES_ROOT =
-  process.env.EDITPRO_FRAME_REFERENCES || "C:\\Users\\divya\\Downloads\\_Frame References";
+  process.env.EDITPRO_FRAME_REFERENCES || "C:\\Users\\divya\\Downloads\\_Frames";
 const OUTPUT_ROOT =
   process.env.EDITPRO_GENERATED_CATALOG ||
   "C:\\Users\\divya\\Downloads\\_Generated Catalog Images";
