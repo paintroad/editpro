@@ -121,7 +121,7 @@ const STYLES = [
   [/kerala|tharavad/i, { kw: /\b(kerala|mural|kathakali|backwaters?|coconut|south indian|tanjore)\b/i, kwWeight: 4, L: 0.45, S: 0.5, W: 0.6 } ],
   [/mughal|courtyard/i, { kw: /\b(mughal|miniature|persian|ragamala|court|nawab|taj)\b/i, kwWeight: 4, L: 0.5, S: 0.45, W: 0.5 } ],
   [/rajasthani|palace|haveli/i, { kw: /\b(rajasthan\w*|palace|pichwai|phad|camel|royal|rajput|haveli)\b/i, kwWeight: 3, L: 0.45, S: 0.55, W: 0.6, hue: ["red", "orange", "yellow"] } ],
-  [/chettinad|heritage|bungalow/i, { kw: /\b(tanjore|vintage|heritage|raja ravi verma|raja-ravi-verma|classic)\b/i, kwWeight: 3, L: 0.45, S: 0.45, W: 0.5 } ],
+  [/chettinad|heritage bungalow/i, { kw: /\b(tanjore|vintage|heritage|raja ravi verma|raja-ravi-verma|classic)\b/i, kwWeight: 3, L: 0.45, S: 0.45, W: 0.5 } ],
   [/contemporary indian|modern boho/i, { kw: /\b(warli|gond|madhubani|folk\w*|tribal|village)\b/i, kwWeight: 3, L: 0.55, S: 0.35, W: 0.4 } ],
   [/indian luxe|contemporary indian|warm minimal indian/i, { kw: /\b(modern|contemporary|minimal\w*|abstract|lotus|gold\w*)\b/i, L: 0.6, S: 0.35, W: 0.4 } ],
   [/everyday home/i, { kw: /\b(minimal\w*|line art|sign|typography|black and white|simple)\b/i, L: 0.65, S: 0.25, W: 0.2 } ],
@@ -135,9 +135,12 @@ const STYLES = [
   [/reading nook|library den/i, { kw: /\b(books?|reading|library|vintage|botanical illustration|maps?|scholar|typewriter|literature)\b/i, kwWeight: 3, L: 0.55, S: 0.3, W: 0.3 } ],
   [/work desk|student desk/i, { kw: /\b(quotes?|motivational|goals?|hustle|success|books?)\b/i, kwWeight: 2, L: 0.6, S: 0.3, W: 0.1 } ],
   [/foyer|passage|earthy contemporary/i, { kw: /\b(earthy|abstract|boho|landscape|panoram\w*)\b/i, L: 0.55, S: 0.35, W: 0.4 } ],
-  [/greige mushroom|caramel olive/i, { kw: /\b(earthy|neutral|muted|desert|dunes?|fields?|countryside|rustic|autumn|abstract|landscape)\b/i, L: 0.5, S: 0.3, W: 0.4, hue: ["orange", "brown", "yellow", "green"] } ],
-  [/coastal (blue grey|powder blue|sage|sea glass|deep navy)/i, { kw: /\b(mountains?|himalaya\w*|lakes?|rivers?|sky|skies|clouds?|mist\w*|fog\w*|snow\w*|waterfalls?|seascape|sea|ocean|beach\w*|waves?|coastal|blue)\b/i, kwWeight: 2, L: 0.6, S: 0.3, W: -0.5, hue: ["blue", "teal", "green"] } ],
-  [/^heritage /i, { kw: /\b(pichwai|tanjore|miniature|mughal|rajasthan\w*|ravi varma|raja-ravi-verma|krishna|radha|ganesh\w*|buddha|shiva|lakshmi|kerala|mural|kalamkari|pattachitra|phad|traditional|indian|temple|elephants?|peacocks?|lotus|royal|palace)\b/i, kwWeight: 4, L: 0.45, S: 0.5, W: 0.5, hue: ["red", "orange", "yellow", "teal"] } ],
+  [/earthy contemporary/i, { kw: /\b(urban|city|cityscapes?|street art|graffiti|skyscrapers?|architect\w*|contemporary|geometric|collage)\b/i, kwWeight: 2 } ],
+  // Abstract and landscape are left to Wide 1 to 3; these two take the distinctly earthy panoramas.
+  [/greige mushroom/i, { kw: /\b(neutral|muted|beige|sand|stone|dunes?|desert|calm|minimal\w*)\b/i, L: 0.6, S: 0.25, W: 0.2 } ],
+  [/caramel olive/i, { kw: /\b(earthy|rustic|autumn|fields?|countryside|olive|wheat|harvest|farm\w*|village)\b/i, L: 0.45, S: 0.35, W: 0.5, hue: ["green", "brown"] } ],
+  [/coastal (blue grey|powder blue|sage|sea glass|deep navy)/i, { kw: /\b(mountains?|himalaya\w*|lakes?|rivers?|sky|skies|clouds?|mist\w*|fog\w*|snow\w*|waterfalls?|seascape|sea|ocean|beach\w*|waves?|coastal)\b/i, kwWeight: 2, L: 0.6, S: 0.3, W: -0.5, hue: ["blue", "teal", "green"] } ],
+  [/^heritage (lime wash|red oxide|deep teal|mustard ochre|teak panelled)/i, { kw: /\b(pichwai|tanjore|miniature|mughal|rajasthan\w*|ravi varma|raja-ravi-verma|krishna|radha|ganesh\w*|buddha|shiva|lakshmi|kerala|mural|kalamkari|pattachitra|phad|indian|heritage|temple|elephants?|peacocks?|lotus|royal|palace)\b/i, kwWeight: 4, L: 0.45, S: 0.5, W: 0.5, hue: ["red", "orange", "yellow", "teal"] } ],
 ];
 
 function setsOnDisk() {

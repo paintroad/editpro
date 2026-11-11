@@ -21,6 +21,9 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { roomName, sameRoom, slug } = require("./room_names");
+const { isGodPainting } = require("../../lib/lifestyle-style");
+const { productHasDeityTags, isBathroomName } = require("../../lib/deity-bathroom");
+const QUADS = require("../frame-quads.json").quads;
 
 const HOME = path.join(os.homedir(), ".editpro");
 const SETS_ROOT = "C:\\Users\\divya\\Downloads\\_Frames\\_New Lifestyle Sets";
@@ -35,6 +38,19 @@ const assignments = JSON.parse(fs.readFileSync(path.join(HOME, "lifestyle-sets",
 const liveProducts = JSON.parse(fs.readFileSync(path.join(HOME, "pipeline-prep", "live-products.json"), "utf8"));
 const liveMedia = JSON.parse(fs.readFileSync(path.join(HOME, "pipeline-prep", "live-media.json"), "utf8")).products;
 const byNumber = new Map((Array.isArray(liveProducts) ? liveProducts : Object.values(liveProducts)).map((p) => [String(p.number), p]));
+const catalog = JSON.parse(fs.readFileSync(path.join(HOME, "catalog-products.json"), "utf8")).products;
+const liveTags = new Map();
+const lsProducts = path.join(HOME, "lifestyle-sets", "products.json");
+if (fs.existsSync(lsProducts)) {
+  for (const p of JSON.parse(fs.readFileSync(lsProducts, "utf8"))) {
+    const m = String(p.sku || "").match(/^(\d+)/);
+    if (m) liveTags.set(m[1], p.tags || []);
+  }
+}
+const tagsOf = (number) => {
+  const c = catalog[number] || {};
+  return c.styleTags?.length ? c.styleTags : c.tags?.length ? c.tags : liveTags.get(String(number)) || [];
+};
 
 const allNames = new Set();
 for (const p of Object.values(liveMedia)) for (const m of p.media) if (m.filename) allNames.add(m.filename.toLowerCase());
@@ -48,7 +64,7 @@ function roomsOf(set) {
     if (!m) continue;
     const base = /^base\b/i.test(m[2]);
     if (base && !/black/i.test(m[2])) continue;
-    rooms.push({ index: Number(m[1]), label: m[2], base, ext: base ? ".png" : ".jpg", ...(base ? { room: null } : roomName(set, m[2])) });
+    rooms.push({ index: Number(m[1]), label: m[2], frame: f, meta: QUADS[set]?.[f]?.meta || {}, base, ext: base ? ".png" : ".jpg", ...(base ? { room: null } : roomName(set, m[2])) });
   }
   rooms.sort((a, b) => a.index - b.index);
   setRooms.set(set, rooms);
@@ -78,8 +94,14 @@ for (const [number, a] of Object.entries(assignments)) {
     return hit;
   };
 
-  for (const r of roomsOf(a.set)) {
-    const img = { position: r.index, setRoom: r.label, room: r.room };
+  // Same room choice as the pipeline: god-only / non-god rooms, and no bathroom for deity art.
+  const tags = tagsOf(number);
+  const god = isGodPainting(tags);
+  const noBathroom = productHasDeityTags({ tags });
+  const rooms = roomsOf(a.set).filter((r) => (r.meta.godOnly ? god : r.meta.nonGod ? !god : true) &&
+    !(noBathroom && (isBathroomName(r.frame) || isBathroomName(r.label) || isBathroomName(r.room))));
+  for (const r of rooms) {
+    const img = { position: r.index, setRoom: r.label, frame: r.frame, room: r.room };
     if (r.base) {
       const hit = take((o) => o.index === 1 && o.ext === ".png");
       if (hit) Object.assign(img, { action: "keep-base", filename: hit.filename, mediaId: hit.id });
