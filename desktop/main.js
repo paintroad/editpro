@@ -138,6 +138,9 @@ function createWindow() {
     } else if (input.alt && key === "arrowleft" && win.webContents.navigationHistory.canGoBack()) {
       win.webContents.navigationHistory.goBack();
       event.preventDefault();
+    } else if (input.alt && key === "arrowright" && win.webContents.navigationHistory.canGoForward()) {
+      win.webContents.navigationHistory.goForward();
+      event.preventDefault();
     }
   });
 
@@ -162,6 +165,30 @@ app.on("before-quit", () => {
 });
 
 app.on("window-all-closed", () => app.quit());
+
+// Right-click menu on every page and popup: navigation and refresh, plus edit actions in text fields.
+app.on("web-contents-created", (_event, contents) => {
+  contents.on("context-menu", (_e, params) => {
+    const nav = contents.navigationHistory;
+    const items = [];
+    if (params.isEditable) {
+      items.push(
+        { role: "cut", enabled: params.editFlags.canCut },
+        { role: "copy", enabled: params.editFlags.canCopy },
+        { role: "paste", enabled: params.editFlags.canPaste },
+        { type: "separator" },
+      );
+    } else if (params.selectionText.trim()) {
+      items.push({ role: "copy" }, { type: "separator" });
+    }
+    items.push(
+      { label: "Back", accelerator: "Alt+Left", enabled: nav.canGoBack(), click: () => nav.goBack() },
+      { label: "Forward", accelerator: "Alt+Right", enabled: nav.canGoForward(), click: () => nav.goForward() },
+      { label: "Refresh", accelerator: "F5", click: () => contents.reload() },
+    );
+    Menu.buildFromTemplate(items).popup();
+  });
+});
 
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
