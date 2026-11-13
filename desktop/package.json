@@ -1,0 +1,15 @@
+{
+  "name": "editpro-desktop",
+  "private": true,
+  "version": "1.0.0",
+  "description": "EditPro as a Windows app: starts the EditPro server, shows it in its own window, stops it on close.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "icon": "node make-icon.js",
+    "shortcut": "powershell -NoProfile -ExecutionPolicy Bypass -File create-shortcut.ps1"
+  },
+  "devDependencies": {
+    "electron": "^45.3.1"
+  }
+}

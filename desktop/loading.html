@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src file:" />
+    <title>EditPro</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #111111;
+        color: #f5f0e8;
+        font-family: "Segoe UI", system-ui, sans-serif;
+      }
+      main {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        text-align: center;
+        padding: 0 24px;
+      }
+      img {
+        width: 72px;
+        height: 72px;
+        border-radius: 16px;
+      }
+      .spinner {
+        width: 28px;
+        height: 28px;
+        border: 3px solid rgba(245, 240, 232, 0.2);
+        border-top-color: #f5f0e8;
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .message {
+        font-size: 18px;
+        font-weight: 600;
+      }
+      .detail {
+        font-size: 13px;
+        color: rgba(245, 240, 232, 0.6);
+        max-width: 560px;
+        word-break: break-all;
+      }
+      .error .spinner {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="root">
+      <img src="../public/favicon.png" alt="" />
+      <div class="spinner"></div>
+      <div class="message" id="message"></div>
+      <div class="detail" id="detail"></div>
+    </main>
+    <script>
+      const params = new URLSearchParams(location.search);
+      document.getElementById("message").textContent = params.get("message") || "Starting EditPro…";
+      if (params.get("kind") === "error") {
+        document.getElementById("root").classList.add("error");
+        document.getElementById("detail").textContent =
+          "Close this window and open EditPro again. Server log: " + params.get("log");
+      }
+    </script>
+  </body>
+</html>

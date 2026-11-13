@@ -1564,12 +1564,11 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   const directUrl = `http://localhost:${PORT}${BASE_PATH}/`;
-  const proxyUrl = `http://localhost${BASE_PATH}/`;
   console.log(`EditPro running at ${directUrl}`);
-  console.log(`With port-80 proxy: ${proxyUrl}`);
   console.log("Press Ctrl+C to stop.");
 
-  if (process.platform === "win32") {
+  // The desktop app shows EditPro in its own window.
+  if (process.platform === "win32" && !process.env.EDITPRO_DESKTOP) {
     try {
       execFileSync("cmd", ["/c", "start", "", directUrl], { windowsHide: true });
     } catch {
